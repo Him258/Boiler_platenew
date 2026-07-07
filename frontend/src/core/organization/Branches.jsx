@@ -5,15 +5,17 @@ import { Plus, Edit, Trash2 } from 'lucide-react';
 import { UniversalCRUDLayout } from '@/components/layout/UniversalCRUDLayout';
 import { Drawer } from '@/components/ui/Drawer';
 
+export const initialBranches = [
+  { id: 1, c1: 'HQ', c2: 'Acme Corp', c3: 'Jane Doe', c4: '150', c5: 'New York', c6: 'Active' },
+  { id: 2, c1: 'West Coast', c2: 'Acme Corp', c3: 'John Smith', c4: '45', c5: 'San Francisco', c6: 'Active' },
+  { id: 3, c1: 'Main Branch', c2: 'Stark Industries', c3: 'Tony Stark', c4: '2000', c5: 'Los Angeles', c6: 'Active' }
+];
+
 export function Branches() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  const [data, setData] = useState([
-    { id: 1, c1: 'HQ', c2: 'Acme Corp', c3: 'Jane Doe', c4: '150', c5: 'New York', c6: 'Active' },
-    { id: 2, c1: 'West Coast', c2: 'Acme Corp', c3: 'John Smith', c4: '45', c5: 'San Francisco', c6: 'Active' },
-    { id: 3, c1: 'Main Branch', c2: 'Stark Industries', c3: 'Tony Stark', c4: '2000', c5: 'Los Angeles', c6: 'Active' }
-  ]);
+  const [data, setData] = useState(initialBranches);
   const [organizations, setOrganizations] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({ c1: '', c2: '', c3: '', c4: '', c5: '', c6: '' });
@@ -53,16 +55,28 @@ export function Branches() {
   };
 
   const handleSave = () => {
+    let newData;
     if (editingId) {
-      setData(data.map(d => d.id === editingId ? { ...d, ...formData } : d));
+      newData = data.map(d => d.id === editingId ? { ...d, ...formData } : d);
     } else {
-      setData([{ ...formData, id: Date.now() }, ...data]);
+      newData = [{ ...formData, id: Date.now() }, ...data];
     }
+    setData(newData);
+    
+    // Mutate the exported array to persist data across page navigations (Mock Frontend DB)
+    initialBranches.length = 0;
+    initialBranches.push(...newData);
+    
     setIsDrawerOpen(false);
   };
 
   const handleDelete = (id) => {
-    setData(data.filter(d => d.id !== id));
+    const newData = data.filter(d => d.id !== id);
+    setData(newData);
+    
+    // Mutate the exported array to persist data
+    initialBranches.length = 0;
+    initialBranches.push(...newData);
   };
 
   const handleChange = (e) => {

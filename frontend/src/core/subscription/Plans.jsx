@@ -4,71 +4,24 @@ import { Plus, Edit, Trash2, Package } from 'lucide-react';
 import { UniversalCRUDLayout } from '@/components/layout/UniversalCRUDLayout';
 import { Drawer } from '@/components/ui/Drawer';
 import { StatCard } from '@/components/ui/StatCard';
+import { initialFeatures } from './Features';
 
 const cls = "block w-full rounded-md border-0 py-1.5 px-3 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-primary sm:text-sm dark:bg-slate-900 dark:text-white dark:ring-slate-700";
 const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
 
+export const initialPlans = [
+  { id: 1, name: "Free Tier", monthlyPrice: 0, annualPrice: 0, subscribers: 12450, features: "Basic Features, 1 User, 1GB Storage", status: "Active" },
+  { id: 2, name: "Startup Plan", monthlyPrice: 49, annualPrice: 490, subscribers: 3200, features: "Standard Features, 10 Users, 50GB Storage", status: "Active" },
+  { id: 3, name: "Pro Plan", monthlyPrice: 99, annualPrice: 990, subscribers: 1500, features: "Advanced Features, 50 Users, 500GB Storage", status: "Active" },
+  { id: 4, name: "Enterprise", monthlyPrice: 499, annualPrice: 4990, subscribers: 410, features: "Unlimited Features, Unlimited Users, 5TB Storage", status: "Active" },
+  { id: 5, name: "Legacy V1", monthlyPrice: 29, annualPrice: 290, subscribers: 150, features: "Legacy Features", status: "Archived" },
+  { id: 6, name: "Custom Enterprise", monthlyPrice: 1999, annualPrice: 19990, subscribers: 12, features: "Dedicated Support, Custom Limits", status: "Active" }
+];
+
 export function Plans() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-
-  const [data, setData] = useState([
-    {
-      id: 1,
-      name: "Free Tier",
-      monthlyPrice: 0,
-      annualPrice: 0,
-      subscribers: 12450,
-      features: "Basic Features, 1 User, 1GB Storage",
-      status: "Active"
-    },
-    {
-      id: 2,
-      name: "Startup Plan",
-      monthlyPrice: 49,
-      annualPrice: 490,
-      subscribers: 3200,
-      features: "Standard Features, 10 Users, 50GB Storage",
-      status: "Active"
-    },
-    {
-      id: 3,
-      name: "Pro Plan",
-      monthlyPrice: 99,
-      annualPrice: 990,
-      subscribers: 1500,
-      features: "Advanced Features, 50 Users, 500GB Storage",
-      status: "Active"
-    },
-    {
-      id: 4,
-      name: "Enterprise",
-      monthlyPrice: 499,
-      annualPrice: 4990,
-      subscribers: 410,
-      features: "Unlimited Features, Unlimited Users, 5TB Storage",
-      status: "Active"
-    },
-    {
-      id: 5,
-      name: "Legacy V1",
-      monthlyPrice: 29,
-      annualPrice: 290,
-      subscribers: 150,
-      features: "Legacy Features",
-      status: "Archived"
-    },
-    {
-      id: 6,
-      name: "Custom Enterprise",
-      monthlyPrice: 1999,
-      annualPrice: 19990,
-      subscribers: 12,
-      features: "Dedicated Support, Custom Limits",
-      status: "Active"
-    }
-  ]);
-
+  const [data, setData] = useState(initialPlans);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({ name: '', monthlyPrice: '', annualPrice: '', features: '', status: 'Active' });
 
@@ -90,16 +43,26 @@ export function Plans() {
   };
 
   const handleSave = () => {
+    let newData;
     if (editingId) {
-      setData(data.map(d => d.id === editingId ? { ...d, ...formData } : d));
+      newData = data.map(d => d.id === editingId ? { ...d, ...formData } : d);
     } else {
-      setData([{ ...formData, id: Date.now(), subscribers: 0 }, ...data]);
+      newData = [{ ...formData, id: Date.now(), subscribers: 0 }, ...data];
     }
+    setData(newData);
+    
+    initialPlans.length = 0;
+    initialPlans.push(...newData);
+    
     setIsDrawerOpen(false);
   };
 
   const handleDelete = (id) => {
-    setData(data.filter(d => d.id !== id));
+    const newData = data.filter(d => d.id !== id);
+    setData(newData);
+    
+    initialPlans.length = 0;
+    initialPlans.push(...newData);
   };
 
   const handleChange = (e) => {
@@ -204,8 +167,31 @@ export function Plans() {
 
           <div>
             <label className={labelCls}>Included Features</label>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Comma separated list of features</p>
-            <textarea name="features" value={formData.features} onChange={handleChange} rows={3} className={cls} placeholder="e.g. 50 Users, 500GB Storage, API Access..." />
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Select the features included in this plan</p>
+            <div className="max-h-48 overflow-y-auto space-y-2 rounded-md border p-3 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+              {initialFeatures.map(feat => {
+                const isSelected = formData.features?.includes(feat.c1);
+                return (
+                  <label key={feat.id} className="flex items-center space-x-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-slate-300 text-primary focus:ring-primary dark:border-slate-600 dark:bg-slate-800"
+                      checked={isSelected}
+                      onChange={() => {
+                        let currentFeatures = formData.features ? formData.features.split(',').map(f => f.trim()).filter(Boolean) : [];
+                        if (currentFeatures.includes(feat.c1)) {
+                          currentFeatures = currentFeatures.filter(f => f !== feat.c1);
+                        } else {
+                          currentFeatures.push(feat.c1);
+                        }
+                        setFormData(prev => ({ ...prev, features: currentFeatures.join(', ') }));
+                      }}
+                    />
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{feat.c1}</span>
+                  </label>
+                )
+              })}
+            </div>
           </div>
 
           <div>

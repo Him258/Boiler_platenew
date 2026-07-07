@@ -16,13 +16,15 @@ const statusColor = (s) => {
 
 const emptyForm = { name: '', email: '', role: '', organization: '', status: 'Active' };
 
+export const initialUsers = [
+  { id: 1, name: 'Alice Smith', email: 'alice@acmecorp.com', role: 'Super Admin', organization: 'Acme Corp', status: 'Active', lastLogin: '2 hours ago' },
+  { id: 2, name: 'Bob Jones', email: 'bob@stark.com', role: 'Sales Agent', organization: 'Stark Industries', status: 'Active', lastLogin: '1 day ago' }
+];
+
 export function UsersList() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [data, setData] = useState([
-    { id: 1, name: 'Alice Smith', email: 'alice@acmecorp.com', role: 'Super Admin', organization: 'Acme Corp', status: 'Active', lastLogin: '2 hours ago' },
-    { id: 2, name: 'Bob Jones', email: 'bob@stark.com', role: 'Sales Agent', organization: 'Stark Industries', status: 'Active', lastLogin: '1 day ago' }
-  ]);
+  const [data, setData] = useState(initialUsers);
   const [roles, setRoles] = useState([
     { id: 1, roleName: 'Super Admin' },
     { id: 2, roleName: 'Sales Agent' }
@@ -59,23 +61,28 @@ export function UsersList() {
   };
 
   const handleSave = () => {
-    const payload = {
-      name: formData.name,
-      email: formData.email,
-      role: formData.role,
-      organization: formData.organization,
-      status: formData.status,
-    };
+    let newData;
     if (editingId) {
-      setData(data.map(d => d.id === editingId ? { ...d, ...payload } : d));
+      newData = data.map(d => d.id === editingId ? { ...d, ...formData } : d);
     } else {
-      setData([{ ...payload, id: Date.now(), lastLogin: 'Just now' }, ...data]);
+      newData = [{ ...formData, id: Date.now(), lastLogin: 'Just now' }, ...data];
     }
+    setData(newData);
+    
+    // Persist to global mock state
+    initialUsers.length = 0;
+    initialUsers.push(...newData);
+    
     setIsDrawerOpen(false);
   };
 
   const handleDelete = (id) => {
-    setData(data.filter(d => d.id !== id));
+    const newData = data.filter(d => d.id !== id);
+    setData(newData);
+    
+    // Persist to global mock state
+    initialUsers.length = 0;
+    initialUsers.push(...newData);
   };
 
   const filtered = data.filter(item =>

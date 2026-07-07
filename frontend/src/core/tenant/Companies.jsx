@@ -7,16 +7,18 @@ import { Drawer } from '@/components/ui/Drawer';
 import { StatCard } from '@/components/ui/StatCard';
 import { MockChart } from '@/components/ui/MockChart';
 
+export const initialTenants = [
+  { id: 1, c1: 'TNT-001', c2: 'Acme Corp', c3: 'Enterprise', c4: '1,200', c5: '50 GB', c6: 'Active' },
+  { id: 2, c1: 'TNT-002', c2: 'Stark Industries', c3: 'Pro', c4: '45', c5: '10 GB', c6: 'Active' },
+  { id: 3, c1: 'TNT-003', c2: 'Wayne Enterprises', c3: 'Enterprise', c4: '3,400', c5: '120 GB', c6: 'Active' },
+  { id: 4, c1: 'TNT-004', c2: 'Globex', c3: 'Basic', c4: '12', c5: '2 GB', c6: 'Suspended' }
+];
+
 export function Companies() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  const [data, setData] = useState([
-    { id: 1, c1: 'TNT-001', c2: 'Acme Corp', c3: 'Enterprise', c4: '1,200', c5: '50 GB', c6: 'Active' },
-    { id: 2, c1: 'TNT-002', c2: 'Stark Industries', c3: 'Pro', c4: '45', c5: '10 GB', c6: 'Active' },
-    { id: 3, c1: 'TNT-003', c2: 'Wayne Enterprises', c3: 'Enterprise', c4: '3,400', c5: '120 GB', c6: 'Active' },
-    { id: 4, c1: 'TNT-004', c2: 'Globex', c3: 'Basic', c4: '12', c5: '2 GB', c6: 'Suspended' }
-  ]);
+  const [data, setData] = useState(initialTenants);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({ c1: '', c2: '', c3: '', c4: '', c5: '', c6: '' });
 
@@ -34,16 +36,28 @@ export function Companies() {
   };
 
   const handleSave = () => {
+    let newData;
     if (editingId) {
-      setData(data.map(d => d.id === editingId ? { ...d, ...formData } : d));
+      newData = data.map(d => d.id === editingId ? { ...d, ...formData } : d);
     } else {
-      setData([{ ...formData, id: Date.now() }, ...data]);
+      newData = [{ ...formData, id: Date.now() }, ...data];
     }
+    setData(newData);
+    
+    // Persist to global mock state
+    initialTenants.length = 0;
+    initialTenants.push(...newData);
+    
     setIsDrawerOpen(false);
   };
 
   const handleDelete = (id) => {
-    setData(data.filter(d => d.id !== id));
+    const newData = data.filter(d => d.id !== id);
+    setData(newData);
+    
+    // Persist to global mock state
+    initialTenants.length = 0;
+    initialTenants.push(...newData);
   };
 
   const handleChange = (e) => {

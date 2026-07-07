@@ -6,86 +6,21 @@ import { Drawer } from '@/components/ui/Drawer';
 import { StatCard } from '@/components/ui/StatCard';
 import { MockChart } from '@/components/ui/MockChart';
 
+export const initialFiles = [
+  { "id": 1, "c1": "q3_report.pdf", "c2": "PDF Document", "c3": "2.4 MB", "c4": "Alice Freeman", "c5": "Acme Corp", "c6": "2 mins ago" },
+  { "id": 2, "c1": "logo_v2.png", "c2": "Image", "c3": "845 KB", "c4": "Bob Smith", "c5": "Stark Ind.", "c6": "1 hour ago" },
+  { "id": 3, "c1": "user_export.csv", "c2": "Spreadsheet", "c3": "12.1 MB", "c4": "System", "c5": "Wayne Ent.", "c6": "Yesterday" },
+  { "id": 4, "c1": "onboarding.mp4", "c2": "Video", "c3": "145.0 MB", "c4": "Diana Prince", "c5": "Acme Corp", "c6": "2 days ago" },
+  { "id": 5, "c1": "contract_signed.pdf", "c2": "PDF Document", "c3": "1.2 MB", "c4": "Evan Wright", "c5": "Hooli", "c6": "Jan 15, 2026" },
+  { "id": 6, "c1": "architecture_diagram.drawio", "c2": "Diagram", "c3": "3.5 MB", "c4": "Tech Lead", "c5": "Wayne Ent.", "c6": "Jan 20, 2026" },
+  { "id": 7, "c1": "marketing_assets.zip", "c2": "Archive", "c3": "54.2 MB", "c4": "Marketing Team", "c5": "Stark Ind.", "c6": "Feb 01, 2026" },
+  { "id": 8, "c1": "index.js", "c2": "Code", "c3": "45 KB", "c4": "Developer", "c5": "System", "c6": "Feb 15, 2026" }
+];
+
 export function Files() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-
-  const [data, setData] = useState([
-  {
-    "id": 1,
-    "c1": "q3_report.pdf",
-    "c2": "PDF Document",
-    "c3": "2.4 MB",
-    "c4": "Alice Freeman",
-    "c5": "Acme Corp",
-    "c6": "2 mins ago"
-  },
-  {
-    "id": 2,
-    "c1": "logo_v2.png",
-    "c2": "Image",
-    "c3": "845 KB",
-    "c4": "Bob Smith",
-    "c5": "Stark Ind.",
-    "c6": "1 hour ago"
-  },
-  {
-    "id": 3,
-    "c1": "user_export.csv",
-    "c2": "Spreadsheet",
-    "c3": "12.1 MB",
-    "c4": "System",
-    "c5": "Wayne Ent.",
-    "c6": "Yesterday"
-  },
-  {
-    "id": 4,
-    "c1": "onboarding.mp4",
-    "c2": "Video",
-    "c3": "145.0 MB",
-    "c4": "Diana Prince",
-    "c5": "Acme Corp",
-    "c6": "2 days ago"
-  },
-  {
-    "id": 5,
-    "c1": "contract_signed.pdf",
-    "c2": "PDF Document",
-    "c3": "1.2 MB",
-    "c4": "Evan Wright",
-    "c5": "Hooli",
-    "c6": "Jan 15, 2026"
-  },
-  {
-    "id": 6,
-    "c1": "profile_pic.jpg",
-    "c2": "Image",
-    "c3": "450 KB",
-    "c4": "Fiona Gallagher",
-    "c5": "Acme Corp",
-    "c6": "Jan 20, 2026"
-  },
-  {
-    "id": 7,
-    "c1": "backup_db.sql",
-    "c2": "Database",
-    "c3": "2.4 GB",
-    "c4": "System Admin",
-    "c5": "System",
-    "c6": "Feb 01, 2026"
-  },
-  {
-    "id": 8,
-    "c1": "styles.css",
-    "c2": "Code",
-    "c3": "45 KB",
-    "c4": "Developer",
-    "c5": "System",
-    "c6": "Feb 15, 2026"
-  }
-]);
-
-  
+  const [data, setData] = useState(initialFiles);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({ c1: '', c2: '', c3: '', c4: '', c5: '', c6: '' });
 
@@ -101,16 +36,26 @@ export function Files() {
   };
 
   const handleSave = () => {
+    let newData;
     if (editingId) {
-      setData(data.map(d => d.id === editingId ? { ...formData, id: editingId } : d));
+      newData = data.map(d => d.id === editingId ? { ...formData, id: editingId } : d);
     } else {
-      setData([{ ...formData, id: Date.now() }, ...data]);
+      newData = [{ ...formData, id: Date.now() }, ...data];
     }
+    setData(newData);
+    
+    initialFiles.length = 0;
+    initialFiles.push(...newData);
+    
     setIsDrawerOpen(false);
   };
 
   const handleDelete = (id) => {
-    setData(data.filter(d => d.id !== id));
+    const newData = data.filter(d => d.id !== id);
+    setData(newData);
+    
+    initialFiles.length = 0;
+    initialFiles.push(...newData);
   };
 
   const handleChange = (e) => {

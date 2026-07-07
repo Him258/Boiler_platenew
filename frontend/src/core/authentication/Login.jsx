@@ -117,16 +117,10 @@ export function Login() {
       </div>
 
       <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800">
-        <p className="text-sm text-center text-slate-500 mb-4">Or use demo credentials to test RBAC:</p>
+        <p className="text-sm text-center text-slate-500 mb-4">Or use demo credentials to test:</p>
         <div className="grid gap-2">
           <Button type="button" variant="outline" className="w-full justify-start text-xs" onClick={() => handleDemoLogin('admin@kiaan.com')}>
             <span className="w-16 inline-block font-bold">Admin:</span> admin@kiaan.com
-          </Button>
-          <Button type="button" variant="outline" className="w-full justify-start text-xs" onClick={() => handleDemoLogin('sales@kiaan.com')}>
-            <span className="w-16 inline-block font-bold">Sales:</span> sales@kiaan.com
-          </Button>
-          <Button type="button" variant="outline" className="w-full justify-start text-xs" onClick={() => handleDemoLogin('support@kiaan.com')}>
-            <span className="w-16 inline-block font-bold">Support:</span> support@kiaan.com
           </Button>
         </div>
       </div>

@@ -1,6 +1,10 @@
 import { Users, Building2, CreditCard, ActivitySquare, Database, Cpu, Send, DollarSign } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
 import { Link } from 'react-router-dom'
+import { initialTenants as tenantsList } from '../tenant/Companies'
+import { initialUsers as usersList } from '../users/UsersList'
+import { initialPlans as plansData } from '../subscription/Plans'
+import { initialFiles as storageFiles } from '../storage/Files'
 
 const revenueData = [
   { name: 'Jan', total: 1200 },
@@ -22,21 +26,17 @@ const userData = [
 
 export function Dashboard() {
   // Mock Data arrays to make dashboard dynamic (Will be replaced by real API data)
-  const usersList = Array(8432).fill({ status: 'active' });
-  const tenantsList = Array(143).fill({ branches: 2, status: 'active' });
-  const plansData = Array(112).fill({ mrr: 403.85 }); // ~$45,231 total
-  const storageFiles = Array(120).fill({ sizeMB: 10240 }); // ~1.2TB
   const apiLogs = Array(12).fill({ calls: 100000 }); // 1.2M
   const aiLogs = Array(45).fill({ tokens: 100000 }); // 4.5M
 
   const stats = [
     { name: 'Total Users', value: usersList.length.toLocaleString(), change: '+12%', icon: Users, link: '/access/users' },
-    { name: 'Active Users', value: usersList.filter(u => u.status === 'active').slice(0, 5210).length.toLocaleString(), change: '+18%', icon: ActivitySquare, link: '/access/users' },
-    { name: 'Total Companies', value: tenantsList.length.toLocaleString(), change: '+5%', icon: Building2, link: '/multitenant/tenants' },
-    { name: 'Branches', value: tenantsList.reduce((sum, t) => sum + t.branches, 0).toLocaleString(), change: '+2%', icon: Building2, link: '/organization/branches' },
-    { name: 'Revenue', value: `$${Math.round(plansData.reduce((sum, p) => sum + p.mrr, 0)).toLocaleString()}`, change: '+24%', icon: DollarSign, link: '/subscription/billing' },
-    { name: 'Active Plans', value: plansData.length.toLocaleString(), change: '+18%', icon: CreditCard, link: '/subscription/plans' },
-    { name: 'Storage Usage', value: `${(storageFiles.reduce((sum, f) => sum + f.sizeMB, 0) / 1024 / 1024).toFixed(1)} TB`, change: '+32%', icon: Database, link: '/storage/files' },
+    { name: 'Active Users', value: usersList.filter(u => u.status === 'Active').length.toLocaleString(), change: `+${usersList.filter(u => u.status === 'Active').length} total`, icon: ActivitySquare, link: '/access/users' },
+    { name: 'Total Companies', value: tenantsList.length.toLocaleString(), change: `+${tenantsList.filter(t => t.c6 === 'Active').length} active`, icon: Building2, link: '/multitenant/tenants' },
+    { name: 'Branches', value: (tenantsList.length * 2).toLocaleString(), change: '+2%', icon: Building2, link: '/organization/branches' },
+    { name: 'Revenue', value: `$${Math.round(plansData.reduce((sum, p) => sum + (p.monthlyPrice || 0), 0)).toLocaleString()}`, change: '+24%', icon: DollarSign, link: '/subscription/billing' },
+    { name: 'Active Plans', value: plansData.filter(p => p.status === 'Active').length.toLocaleString(), change: `+${plansData.length} total`, icon: CreditCard, link: '/subscription/plans' },
+    { name: 'Storage Usage', value: `${(storageFiles.reduce((sum, f) => sum + parseFloat(f.c3), 0)).toFixed(1)} MB`, change: `+${storageFiles.length} files`, icon: Database, link: '/storage/files' },
     { name: 'API Requests', value: `${(apiLogs.reduce((sum, a) => sum + a.calls, 0) / 1000000).toFixed(1)}M`, change: '+14%', icon: Send, link: '/api/keys' },
     { name: 'AI Usage (Tokens)', value: `${(aiLogs.reduce((sum, a) => sum + a.tokens, 0) / 1000000).toFixed(1)}M`, change: '+45%', icon: Cpu, link: '/ai/providers' },
   ]

@@ -5,6 +5,7 @@ import { Plus, Edit, Trash2, Building } from 'lucide-react';
 import { UniversalCRUDLayout } from '@/components/layout/UniversalCRUDLayout';
 import { Drawer } from '@/components/ui/Drawer';
 import { StatCard } from '@/components/ui/StatCard';
+import { initialBranches } from './Branches';
 
 const cls = "block w-full rounded-md border-0 py-1.5 px-3 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-primary sm:text-sm dark:bg-slate-900 dark:text-white dark:ring-slate-700";
 const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
@@ -203,8 +204,13 @@ export function Organizations() {
             <input name="users" value={formData.users} onChange={handleChange} type="number" className={cls} placeholder="0" />
           </div>
           <div>
-            <label className={labelCls}>Branches</label>
-            <input name="branches" value={formData.branches} onChange={handleChange} type="number" className={cls} placeholder="0" />
+            <label className={labelCls}>Branch</label>
+            <select name="branches" value={formData.branches} onChange={handleChange} className={cls}>
+              <option value="">Select Branch...</option>
+              {initialBranches.map(b => (
+                <option key={b.id} value={b.c1}>{b.c1}</option>
+              ))}
+            </select>
           </div>
         </div>
 

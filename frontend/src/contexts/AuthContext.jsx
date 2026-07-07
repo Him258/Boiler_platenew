@@ -26,12 +26,16 @@ export function AuthProvider({ children }) {
       
       // Mock validation
       if (email && password) {
+        let role = "Super Admin";
+        if (email.includes("sales")) role = "Sales Agent";
+        if (email.includes("support")) role = "Support Staff";
+
         const loggedInUser = {
           id: "usr-1",
-          firstName: "Admin",
+          firstName: role.split(' ')[0],
           lastName: "User",
           email: email,
-          role: "Super Admin",
+          role: role,
           tenantId: "t-1",
           tenantName: "Kiaan Technologies"
         };

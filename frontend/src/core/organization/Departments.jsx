@@ -5,6 +5,7 @@ import { Plus, Edit, Trash2, Briefcase } from 'lucide-react';
 import { UniversalCRUDLayout } from '@/components/layout/UniversalCRUDLayout';
 import { Drawer } from '@/components/ui/Drawer';
 import { StatCard } from '@/components/ui/StatCard';
+import { initialBranches as branches } from './Branches';
 
 const cls = "block w-full rounded-md border-0 py-1.5 px-3 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-primary sm:text-sm dark:bg-slate-900 dark:text-white dark:ring-slate-700";
 const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
@@ -18,11 +19,6 @@ export function Departments() {
   ]);
   
   // We will fetch Branches to show in the dropdown for Departments
-  const [branches, setBranches] = useState([
-    { id: 1, branchName: 'HQ' },
-    { id: 2, branchName: 'West Coast' },
-    { id: 3, branchName: 'Main Branch' }
-  ]);
   
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({ name: '', branchId: '', head: '', employees: '', budget: '', status: 'Active' });
@@ -167,7 +163,7 @@ export function Departments() {
           <select name="branchId" value={formData.branchId} onChange={handleChange} className={cls}>
             <option value="">Select Parent Branch...</option>
             {branches.map(b => (
-              <option key={b.id} value={b.branchName}>{b.branchName}</option>
+              <option key={b.id} value={b.c1}>{b.c1}</option>
             ))}
           </select>
           {branches.length === 0 && <p className="text-xs text-amber-500 mt-1">⚠ No branches found. Create a branch first.</p>}

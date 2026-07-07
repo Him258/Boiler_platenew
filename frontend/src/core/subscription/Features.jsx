@@ -4,11 +4,7 @@ import { Plus, Edit, Trash2 } from 'lucide-react';
 import { UniversalCRUDLayout } from '@/components/layout/UniversalCRUDLayout';
 import { Drawer } from '@/components/ui/Drawer';
 
-export function Features() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-
-  const [data, setData] = useState([
+export const initialFeatures = [
   {
     "id": 1,
     "c1": "Custom Domains",
@@ -81,7 +77,13 @@ export function Features() {
     "c5": "System",
     "c6": "Active"
   }
-]);
+];
+
+export function Features() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
+  const [data, setData] = useState(initialFeatures);
 
   
   const [editingId, setEditingId] = useState(null);

@@ -21,13 +21,13 @@ export const navigation = [
     ]
   },
 
-  // Step 3: Access Control — Roles → Permissions → Users
+  // Step 3: Access Control — Users → Roles → Permissions
   { 
     name: 'Access Control', icon: Users,
     children: [
-      { name: 'Roles',       href: '/access/roles' },        // Step 1: Create roles
-      { name: 'Permissions', href: '/access/permissions' },  // Step 2: Define what each role can do
-      { name: 'Users',       href: '/access/users' },        // Step 3: Assign role to user
+      { name: 'Users',       href: '/access/users' },
+      { name: 'Roles',       href: '/access/roles' },
+      { name: 'Permissions', href: '/access/permissions' },
     ]
   },
 
@@ -69,7 +69,6 @@ export const navigation = [
   { 
     name: 'Notifications', icon: Bell,
     children: [
-      { name: 'Channels', href: '/notifications/channels' },
       { name: 'Templates', href: '/notifications/email-templates' },
       { name: 'Logs', href: '/notifications/logs' },
     ]

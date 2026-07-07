@@ -5,6 +5,7 @@ import { Dropdown, DropdownItem } from "@/components/ui/Dropdown"
 import { Button } from "@/components/ui/Button"
 import { NotificationDrawer } from "./NotificationDrawer"
 import { useAuth } from "@/contexts/AuthContext"
+import { initialBranches } from "@/core/organization/Branches"
 
 export function Header({ setMobileMenuOpen }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false)
@@ -54,8 +55,12 @@ export function Header({ setMobileMenuOpen }) {
               </button>
             }
           >
-            <DropdownItem onClick={() => navigate('/organization/branches')}>Delhi Branch</DropdownItem>
-            <DropdownItem onClick={() => navigate('/organization/branches')}>Mumbai Branch</DropdownItem>
+            <div className="px-3 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">Branches</div>
+            {initialBranches.map(branch => (
+              <DropdownItem key={branch.id} onClick={() => navigate('/organization/branches')}>{branch.c1}</DropdownItem>
+            ))}
+            <div className="border-t border-slate-100 my-1 dark:border-slate-800"></div>
+            <DropdownItem icon={Plus} onClick={() => navigate('/organization/branches')}>Create Branch</DropdownItem>
           </Dropdown>
 
           <div className="w-full max-w-sm relative hidden lg:block ml-4">
