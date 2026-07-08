@@ -4,7 +4,7 @@ const prisma = require('../../config/db');
 
 const generateTokens = (user) => {
   const accessToken = jwt.sign(
-    { userId: user.id, tenantId: user.tenantId, roleId: user.roleId },
+    { userId: user.id, tenantId: user.tenantId, roleId: user.role },
     process.env.JWT_SECRET || 'secret',
     { expiresIn: process.env.JWT_EXPIRES_IN || '1d' }
   );
@@ -24,7 +24,7 @@ exports.login = async (email, password) => {
   }
 
   // Check password
-  const isMatch = await bcrypt.compare(password, user.passwordHash);
+  const isMatch = await bcrypt.compare(password, user.passwordHash || "");
   if (!isMatch) {
     throw new Error('Invalid credentials');
   }
@@ -34,11 +34,10 @@ exports.login = async (email, password) => {
   return {
     user: {
       id: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
+      name: user.name,
       email: user.email,
       tenantId: user.tenantId,
-      tenantName: user.tenant?.name
+      tenantName: user.tenant?.organization
     },
     tokens
   };
@@ -57,7 +56,7 @@ exports.register = async (data) => {
   // Create Tenant
   const tenant = await prisma.tenant.create({
     data: {
-      name: data.tenantName,
+      organization: data.tenantName,
       domain: data.tenantName.toLowerCase().replace(/[^a-z0-9]/g, '') + '.kiaan.core'
     }
   });
@@ -71,8 +70,7 @@ exports.register = async (data) => {
       tenantId: tenant.id,
       email: data.email,
       passwordHash,
-      firstName: data.firstName,
-      lastName: data.lastName,
+      name: `${data.firstName || ''} ${data.lastName || ''}`.trim(),
     }
   });
 
@@ -81,11 +79,10 @@ exports.register = async (data) => {
   return {
     user: {
       id: user.id,
-      firstName: user.firstName,
-      lastName: user.lastName,
+      name: user.name,
       email: user.email,
       tenantId: user.tenantId,
-      tenantName: tenant.name
+      tenantName: tenant.organization
     },
     tokens
   };

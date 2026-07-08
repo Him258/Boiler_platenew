@@ -38,7 +38,7 @@ export function AuthProvider({ children }) {
       
       return { success: true };
     } catch (error) {
-      const msg = error.response?.data?.message || 'Network error.';
+      const msg = error.response?.data?.error?.message || error.response?.data?.message || 'Network error.';
       return { success: false, error: msg };
     }
   };
@@ -54,7 +54,7 @@ export function AuthProvider({ children }) {
       
       return { success: true };
     } catch (error) {
-      const msg = error.response?.data?.message || 'Network error.';
+      const msg = error.response?.data?.error?.message || error.response?.data?.message || 'Network error.';
       return { success: false, error: msg };
     }
   };
