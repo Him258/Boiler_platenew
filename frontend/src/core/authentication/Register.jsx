@@ -1,7 +1,37 @@
-import { Link } from "react-router-dom"
+import { useState } from "react"
+import { Link, useNavigate, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/Button"
+import { useAuth } from "@/contexts/AuthContext"
 
 export function Register() {
+  const [name, setName] = useState("")
+  const [company, setCompany] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
+  const { register } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  const from = location.state?.from?.pathname || "/dashboard"
+
+  const handleRegister = async (e) => {
+    e.preventDefault()
+    setError("")
+    
+    // Simple split for first/last name
+    const nameParts = name.trim().split(" ")
+    const firstName = nameParts[0]
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : ""
+
+    const result = await register(company, firstName, lastName, email, password)
+    if (result.success) {
+      navigate(from, { replace: true })
+    } else {
+      setError(result.error || 'Registration failed')
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="text-center mb-6">
@@ -13,7 +43,13 @@ export function Register() {
         </p>
       </div>
 
-      <form action="#" method="POST" className="space-y-4">
+      {error && (
+        <div className="p-3 text-sm text-red-500 bg-red-50 dark:bg-red-900/30 rounded-md">
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleRegister} className="space-y-4">
         <div>
           <label htmlFor="name" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             Full name
@@ -25,6 +61,8 @@ export function Register() {
               type="text"
               autoComplete="name"
               required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               className="block w-full appearance-none rounded-md border border-slate-300 px-3 py-2 placeholder-slate-400 shadow-sm focus:border-primary focus:outline-none focus:ring-primary sm:text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white text-slate-900"
             />
           </div>
@@ -40,6 +78,8 @@ export function Register() {
               name="company"
               type="text"
               required
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
               className="block w-full appearance-none rounded-md border border-slate-300 px-3 py-2 placeholder-slate-400 shadow-sm focus:border-primary focus:outline-none focus:ring-primary sm:text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white text-slate-900"
             />
           </div>
@@ -56,6 +96,8 @@ export function Register() {
               type="email"
               autoComplete="email"
               required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="block w-full appearance-none rounded-md border border-slate-300 px-3 py-2 placeholder-slate-400 shadow-sm focus:border-primary focus:outline-none focus:ring-primary sm:text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white text-slate-900"
             />
           </div>
@@ -72,6 +114,8 @@ export function Register() {
               type="password"
               autoComplete="new-password"
               required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               className="block w-full appearance-none rounded-md border border-slate-300 px-3 py-2 placeholder-slate-400 shadow-sm focus:border-primary focus:outline-none focus:ring-primary sm:text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white text-slate-900"
             />
           </div>

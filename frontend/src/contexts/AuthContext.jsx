@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import api from '@/lib/api';
 
 const AuthContext = createContext(undefined);
 
@@ -7,8 +8,8 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('kiaan_user');
-    const token = localStorage.getItem('kiaan_token');
+    const storedUser = localStorage.getItem('user');
+    const token = localStorage.getItem('token');
     if (storedUser && token) {
       try {
         setUser(JSON.parse(storedUser));
@@ -16,45 +17,52 @@ export function AuthProvider({ children }) {
         console.error("Failed to parse user session");
       }
     }
+    
+    const handleUnauthorized = () => {
+      setUser(null);
+    };
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    
     setIsLoading(false);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
   const login = async (email, password) => {
     try {
-      // Simulate network request
-      await new Promise(resolve => setTimeout(resolve, 800));
+      const response = await api.post('/auth/login', { email, password });
+      const { user, token } = response.data.data;
       
-      // Mock validation
-      if (email && password) {
-        let role = "Super Admin";
-        if (email.includes("sales")) role = "Sales Agent";
-        if (email.includes("support")) role = "Support Staff";
-
-        const loggedInUser = {
-          id: "usr-1",
-          firstName: role.split(' ')[0],
-          lastName: "User",
-          email: email,
-          role: role,
-          tenantId: "t-1",
-          tenantName: "Kiaan Technologies"
-        };
-        setUser(loggedInUser);
-        localStorage.setItem('kiaan_user', JSON.stringify(loggedInUser));
-        localStorage.setItem('kiaan_token', "mock-jwt-token-12345");
-        return { success: true };
-      } else {
-        return { success: false, error: 'Invalid credentials' };
-      }
+      setUser(user);
+      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('token', token);
+      
+      return { success: true };
     } catch (error) {
-      return { success: false, error: 'Network error.' };
+      const msg = error.response?.data?.message || 'Network error.';
+      return { success: false, error: msg };
+    }
+  };
+
+  const register = async (tenantName, firstName, lastName, email, password) => {
+    try {
+      const response = await api.post('/auth/register', { tenantName, firstName, lastName, email, password });
+      const { user, token } = response.data.data;
+      
+      setUser(user);
+      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('token', token);
+      
+      return { success: true };
+    } catch (error) {
+      const msg = error.response?.data?.message || 'Network error.';
+      return { success: false, error: msg };
     }
   };
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem('kiaan_user');
-    localStorage.removeItem('kiaan_token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
   };
 
   if (isLoading) {
@@ -62,7 +70,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, login, register, logout, isAuthenticated: !!user }}>
       {children}
     </AuthContext.Provider>
   );
