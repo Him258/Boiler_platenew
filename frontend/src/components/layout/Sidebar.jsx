@@ -3,13 +3,15 @@ import { Link, useLocation } from "react-router-dom"
 import { 
   LayoutDashboard, Users, Settings, Building2, ShieldCheck, 
   CreditCard, Bell, FileBox, ActivitySquare, Bot, MessageSquare, 
-  BarChart3, Database, ChevronDown, ChevronRight, Component, AlertTriangle
+  BarChart3, Database, ChevronDown, ChevronRight, Component, AlertTriangle,
+  Folder
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 
 export const navigation = [
   // Step 1: Dashboard — First thing after login
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Projects', href: '/projects', icon: Folder },
 
   // Step 2: Multi Tenant — Setup organizations/companies first
   { 
@@ -136,7 +138,7 @@ export const navigation = [
 ]
 
 const rolePermissions = {
-  'Super Admin': ['Dashboard', 'Identity', 'Tenant Structure', 'Access Control', 'Multi Tenant', 'Subscription', 'Notifications', 'Storage', 'AI Platform', 'Workflow', 'Reports', 'API', 'Settings', 'Analytics', 'System', 'Super Admin'],
+  'Super Admin': ['Dashboard', 'Projects', 'Identity', 'Tenant Structure', 'Access Control', 'Multi Tenant', 'Subscription', 'Notifications', 'Storage', 'AI Platform', 'Workflow', 'Reports', 'API', 'Settings', 'Analytics', 'System', 'Super Admin'],
   'Sales Agent': ['Dashboard', 'Settings'],
   'Support Staff': ['Dashboard', 'Storage', 'Settings']
 }

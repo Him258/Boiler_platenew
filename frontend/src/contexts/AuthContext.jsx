@@ -30,7 +30,8 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     try {
       const response = await api.post('/auth/login', { email, password });
-      const { user, token } = response.data.data;
+      const { user, tokens } = response.data.data;
+      const token = tokens?.accessToken;
       
       setUser(user);
       localStorage.setItem('user', JSON.stringify(user));
@@ -46,7 +47,8 @@ export function AuthProvider({ children }) {
   const register = async (tenantName, firstName, lastName, email, password) => {
     try {
       const response = await api.post('/auth/register', { tenantName, firstName, lastName, email, password });
-      const { user, token } = response.data.data;
+      const { user, tokens } = response.data.data;
+      const token = tokens?.accessToken;
       
       setUser(user);
       localStorage.setItem('user', JSON.stringify(user));

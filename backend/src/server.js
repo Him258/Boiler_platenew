@@ -6,6 +6,13 @@ const jwt = require('jsonwebtoken');
 const chatService = require('./modules/communication/chat.service');
 
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://192.168.1.23:3000',
+  'http://192.168.1.23:5173'
+];
 
 async function startServer() {
   try {
@@ -17,8 +24,9 @@ async function startServer() {
     // Initialize Socket.IO
     const io = new Server(server, {
       cors: {
-        origin: "*", // allow all for dev
-        methods: ["GET", "POST"]
+        origin: allowedOrigins,
+        methods: ["GET", "POST"],
+        credentials: true
       }
     });
 
@@ -65,8 +73,10 @@ async function startServer() {
       });
     });
 
-    server.listen(PORT, () => {
-      console.log(`🚀 Server is running on port ${PORT}`);
+    server.listen(PORT, HOST, () => {
+      console.log(`🚀 Server is running:`);
+      console.log(`   Local URL:   http://localhost:${PORT}`);
+      console.log(`   Network URL: http://192.168.1.23:${PORT}`);
     });
   } catch (error) {
     console.error('❌ Database connection failed:', error);
@@ -75,3 +85,5 @@ async function startServer() {
 }
 
 startServer();
+// Trigger nodemon restart
+

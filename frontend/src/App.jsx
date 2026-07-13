@@ -17,6 +17,8 @@ import { Invoices } from "@/core/subscription/Invoices"
 import { Coupons } from "@/core/subscription/Coupons"
 import { UsageLimits } from "@/core/subscription/UsageLimits"
 import { SettingsLayout } from "@/core/settings/SettingsLayout"
+import { Projects } from "@/core/projects/Projects"
+import { ProjectDetails } from "@/core/projects/ProjectDetails"
 
 import { Companies } from "@/core/tenant/Companies"
 import { UsersList } from "@/core/users/UsersList"
@@ -100,6 +102,10 @@ function App() {
           <Route path="/subscription/coupons" element={<Coupons />} />
           <Route path="/subscription/usage" element={<UsageLimits />} />
           <Route path="/subscription/transactions" element={<Transactions />} />
+
+          {/* Developer Projects */}
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/projects/:id" element={<ProjectDetails />} />
 
           {/* User Management & Tenants */}
           <Route path="/organization" element={<Organizations />} />

@@ -22,6 +22,9 @@ const permissionRoutes = require('./modules/permission/permission.routes');
 const reportsRoutes = require('./modules/reports/reports.routes');
 const fileRoutes = require('./modules/file/file.routes');
 const aiProviderRoutes = require('./modules/ai-provider/ai-provider.routes');
+const projectRoutes = require('./modules/project/project.routes');
+const databaseRoutes = require('./modules/database/database.routes');
+const storageRoutes = require('./modules/storage/storage.routes');
 
 const router = express.Router();
 
@@ -47,5 +50,8 @@ router.use('/permissions', permissionRoutes);
 router.use('/reports', reportsRoutes);
 router.use('/files', fileRoutes);
 router.use('/ai-providers', aiProviderRoutes);
+router.use('/projects', projectRoutes);
+router.use('/database', databaseRoutes);
+router.use('/storage/v1', storageRoutes);
 
 module.exports = router;

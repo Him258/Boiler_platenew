@@ -36,3 +36,14 @@ exports.register = async (req, res) => {
     return sendError(res, 'Failed to create account', 'INTERNAL_ERROR', [], 500);
   }
 };
+
+exports.me = async (req, res) => {
+  try {
+    const data = await authService.getProfile(req.user.userId);
+    return sendSuccess(res, 'Profile retrieved successfully', { user: data });
+  } catch (error) {
+    console.error('[AuthController.me] Error:', error);
+    return sendError(res, error.message || 'Failed to retrieve profile', 'INTERNAL_ERROR', [], 500);
+  }
+};
+

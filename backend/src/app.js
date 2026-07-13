@@ -9,7 +9,17 @@ const routes = require('./routes');
 const app = express();
 
 app.use(helmet());
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://192.168.1.23:3000',
+  'http://192.168.1.23:5173'
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));

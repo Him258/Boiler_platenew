@@ -87,3 +87,24 @@ exports.register = async (data) => {
     tokens
   };
 };
+
+exports.getProfile = async (userId) => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { tenant: true }
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    tenantId: user.tenantId,
+    tenantName: user.tenant?.organization,
+    role: user.role
+  };
+};
+
