@@ -5,8 +5,9 @@ exports.createProject = async (req, res) => {
   try {
     const { name } = req.body;
     const tenantId = req.user.tenantId;
+    const creatorId = req.user.userId;
 
-    const data = await projectService.createProject({ name, tenantId });
+    const data = await projectService.createProject({ name, tenantId, creatorId });
     return sendSuccess(res, 'Project created successfully', data, null, 201);
   } catch (error) {
     console.error('Error creating project:', error);

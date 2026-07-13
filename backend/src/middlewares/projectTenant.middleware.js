@@ -8,10 +8,20 @@ const { sendError } = require('../core/response');
  * Middleware to identify the project and attach the dynamic database client
  */
 const projectTenantMiddleware = async (req, res, next) => {
+  if (req.project) {
+    return next();
+  }
   try {
-    let projectRef = req.headers['x-project-ref'] || req.headers['x-project-id'];
+    let projectRef = req.headers['x-project-ref'] || req.headers['x-project-id'] || req.params.projectId || req.params.id;
     let apiKey = req.headers['apikey'] || req.query.apikey;
     let bearerToken = null;
+
+    if (!projectRef) {
+      const match = req.originalUrl.match(/\/projects\/([^/]+)/);
+      if (match) {
+        projectRef = match[1];
+      }
+    }
 
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
       bearerToken = req.headers.authorization.split(' ')[1];

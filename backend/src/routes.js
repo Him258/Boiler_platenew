@@ -25,6 +25,7 @@ const aiProviderRoutes = require('./modules/ai-provider/ai-provider.routes');
 const projectRoutes = require('./modules/project/project.routes');
 const databaseRoutes = require('./modules/database/database.routes');
 const storageRoutes = require('./modules/storage/storage.routes');
+const rbacRoutes = require('./modules/rbac/rbac.routes');
 
 const router = express.Router();
 
@@ -53,5 +54,6 @@ router.use('/ai-providers', aiProviderRoutes);
 router.use('/projects', projectRoutes);
 router.use('/database', databaseRoutes);
 router.use('/storage/v1', storageRoutes);
+router.use('/rbac', rbacRoutes);
 
 module.exports = router;

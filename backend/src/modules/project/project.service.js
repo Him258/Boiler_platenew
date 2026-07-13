@@ -15,7 +15,7 @@ const generateRefId = (name) => {
   return `${cleanName}-${randomStr}`;
 };
 
-exports.createProject = async ({ name, tenantId }) => {
+exports.createProject = async ({ name, tenantId, creatorId }) => {
   // Check if tenant exists
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId }
@@ -83,7 +83,111 @@ exports.createProject = async ({ name, tenantId }) => {
       ]
     });
 
+    // --- AUTO-PROVISION RBAC FOR THE NEW PROJECT ---
+    
+    // A. Create the project Admin role
+    const adminRole = await tx.role.create({
+      data: {
+        projectId: proj.id,
+        roleName: 'Admin',
+        name: 'Admin',
+        type: 'System',
+        createdBy: creatorId || 'System',
+        status: 'Active'
+      }
+    });
+
+    // B. Create the project authenticated role
+    const authenticatedRole = await tx.role.create({
+      data: {
+        projectId: proj.id,
+        roleName: 'authenticated',
+        name: 'authenticated',
+        type: 'System',
+        createdBy: creatorId || 'System',
+        status: 'Active'
+      }
+    });
+
+    // C. Define default permissions
+    const defaultPermissions = [
+      // Legacy / wildcard permissions for backward compatibility
+      { resource: 'database', action: '*' },
+      { resource: 'storage', action: '*' },
+      { resource: 'users', action: '*' },
+      { resource: 'roles', action: '*' },
+      { resource: 'project', action: '*' },
+      { resource: 'database', action: 'write' },
+      { resource: 'storage', action: 'read' },
+      { resource: 'storage', action: 'write' },
+
+      // Module 6 specified permissions
+      { resource: 'database', action: 'create' },
+      { resource: 'database', action: 'read' },
+      { resource: 'database', action: 'update' },
+      { resource: 'database', action: 'delete' },
+      { resource: 'storage', action: 'upload' },
+      { resource: 'storage', action: 'download' },
+      { resource: 'storage', action: 'delete' },
+      { resource: 'users', action: 'manage' },
+      { resource: 'roles', action: 'manage' },
+      { resource: 'project', action: 'settings' }
+    ];
+
+    // D. Upsert all permissions and map them by resource_action
+    const permMap = {};
+    for (const dp of defaultPermissions) {
+      const perm = await tx.permission.upsert({
+        where: {
+          resource_action: {
+            resource: dp.resource,
+            action: dp.action
+          }
+        },
+        update: {},
+        create: {
+          module: dp.resource,
+          resource: dp.resource,
+          action: dp.action
+        }
+      });
+      permMap[`${dp.resource}.${dp.action}`] = perm.id;
+    }
+
+    // E. Associate ALL permissions with Admin role
+    await tx.rolePermission.createMany({
+      data: Object.values(permMap).map(permId => ({
+        roleId: adminRole.id,
+        permissionId: permId
+      }))
+    });
+
+    // F. Associate permissions with authenticated role
+    const authPermKeys = [
+      'database.read', 'database.write', 'database.create', 'storage.read', 'storage.write'
+    ];
+    await tx.rolePermission.createMany({
+      data: authPermKeys.map(key => ({
+        roleId: authenticatedRole.id,
+        permissionId: permMap[key]
+      }))
+    });
+
+    // G. Assign the project creator to the Admin role
+    if (creatorId) {
+      await tx.userRole.create({
+        data: {
+          userId: creatorId,
+          roleId: adminRole.id,
+          projectId: proj.id
+        }
+      });
+    }
+
     return proj;
+  }, {
+    maxWait: 15000,
+    timeout: 20000
   });
 
   // 2. Perform Provisioning
