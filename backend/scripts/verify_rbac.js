@@ -1,5 +1,6 @@
 /**
- * Integration Test Suite for Module 6: RBAC (Role-Based Access Control)
+ * Comprehensive Integration Test Suite for Module 6: RBAC (Role-Based Access Control)
+ * Verifies Permission CRUD, Role-Permission mappings, User-Role assignments, caching, transaction rollbacks, and project isolation.
  */
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
@@ -32,7 +33,12 @@ async function request(method, path, headers = {}, body = null) {
 }
 
 async function runTests() {
-  console.log('🧪 Starting Kiaan Core Module 6 RBAC Integration Tests...\n');
+  console.log('🧪 Starting Kiaan Core Module 6 Full RBAC Integration Tests...\n');
+
+  let projectA = null;
+  let projectB = null;
+  let guestUser = null;
+  let devToken = null;
 
   try {
     // 1. Control Plane login as Developer
@@ -46,104 +52,140 @@ async function runTests() {
       throw new Error(`Developer login failed: ${JSON.stringify(loginRes.body)}`);
     }
 
-    const devToken = loginRes.body.data.tokens.accessToken;
+    devToken = loginRes.body.data.tokens.accessToken;
     const devUser = loginRes.body.data.user;
     const authHeaders = { 'Authorization': `Bearer ${devToken}` };
     console.log(`✅ Logged in. Dev User ID: ${devUser.id}`);
 
-    // 2. Create new project to trigger Admin role creation & default permissions seeding
-    const projName = `RBAC_Project_${Date.now()}`;
-    console.log(`\n2. Creating temporary test project: ${projName}...`);
-    const projRes = await request('POST', '/projects', authHeaders, {
-      name: projName
-    });
+    // 2. Provision Project A and Project B for Project Isolation tests
+    console.log('\n2. Creating temporary test projects (A & B) for isolation checks...');
+    const projARes = await request('POST', '/projects', authHeaders, { name: `RBAC_ProjA_${Date.now()}` });
+    const projBRes = await request('POST', '/projects', authHeaders, { name: `RBAC_ProjB_${Date.now()}` });
 
-    if (projRes.status !== 201) {
-      throw new Error(`Failed to create project: ${JSON.stringify(projRes.body)}`);
+    if (projARes.status !== 201 || projBRes.status !== 201) {
+      throw new Error(`Failed to create projects: A=${projARes.status}, B=${projBRes.status}`);
     }
 
-    const project = projRes.body.data;
-    console.log(`✅ Project created. ID: ${project.id}`);
-    
-    console.log('Waiting 3 seconds for database and schema setup...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    projectA = projARes.body.data;
+    projectB = projBRes.body.data;
+    console.log(`✅ Projects created. Proj A ID: ${projectA.id}, Proj B ID: ${projectB.id}`);
 
-    // 3. Verify Admin role auto-creation and seeding
-    console.log('\n3. Verifying default database state...');
+    console.log('Waiting 3.5 seconds for databases & schema provisioning...');
+    await new Promise(resolve => setTimeout(resolve, 3500));
+
+    // 3. Verify Default Seeding and Roles in both projects
+    console.log('\n3. Verifying default seeded roles and permissions...');
     
-    // Check if the 10 default permissions are present
-    const seededPerms = await prisma.permission.findMany({
-      where: {
-        resource: { in: ['database', 'storage', 'users', 'roles', 'project'] }
+    // Check project A roles
+    const rolesA = await prisma.role.findMany({ where: { projectId: projectA.id } });
+    const roleNamesA = rolesA.map(r => r.name);
+    console.log(`- Project A roles found: ${roleNamesA.join(', ')}`);
+    for (const roleName of ['Admin', 'Developer', 'Manager', 'User', 'Viewer', 'authenticated']) {
+      if (!roleNamesA.includes(roleName)) {
+        throw new Error(`Project A is missing seeded role: ${roleName}`);
       }
-    });
-    console.log(`- Total permissions present in DB: ${seededPerms.length}`);
-    if (seededPerms.length < 10) {
-      throw new Error('Default permissions were not seeded.');
     }
 
-    // Check if the Admin role exists for this project
-    const adminRole = await prisma.role.findFirst({
-      where: { projectId: project.id, name: 'Admin' }
-    });
-    if (!adminRole) {
-      throw new Error('Default Admin role was not created for the project.');
+    // Check project B roles
+    const rolesB = await prisma.role.findMany({ where: { projectId: projectB.id } });
+    const roleNamesB = rolesB.map(r => r.name);
+    console.log(`- Project B roles found: ${roleNamesB.join(', ')}`);
+    if (roleNamesB.length !== roleNamesA.length) {
+      throw new Error('Project B seeded role count mismatch.');
     }
-    console.log(`- Project Admin role found: ${adminRole.id}`);
+    console.log('✅ Seeding verified successfully.');
 
-    // Check if project creator is assigned to Admin role
-    const ownerRoleMapping = await prisma.userRole.findFirst({
-      where: {
-        userId: devUser.id,
-        roleId: adminRole.id,
-        projectId: project.id
-      }
+    // 4. Verify Project Isolation
+    console.log('\n4. Verifying Project Isolation...');
+    // Create a custom permission on Project A
+    const customPermA = await request('POST', `/rbac/permissions?projectId=${projectA.id}`, authHeaders, {
+      permissionKey: 'custom.test.perm',
+      displayName: 'Custom Test Permission',
+      category: 'testing'
     });
-    if (!ownerRoleMapping) {
-      throw new Error('Project creator was not automatically assigned to Admin role.');
-    }
-    console.log(`- Project creator UserRole mapping found: ${ownerRoleMapping.id}`);
-
-    // 4. Create custom Role: "Writer"
-    console.log('\n4. Creating custom role "Writer"...');
-    const createRoleRes = await request('POST', '/rbac/roles', authHeaders, {
-      projectId: project.id,
-      name: 'Writer',
-      description: 'Role with database creation capability'
-    });
-
-    if (createRoleRes.status !== 201) {
-      throw new Error(`Failed to create custom role: ${JSON.stringify(createRoleRes.body)}`);
-    }
-    const writerRole = createRoleRes.body.data;
-    console.log(`- Custom role created: ${writerRole.name} (ID: ${writerRole.id})`);
-
-    // 5. Assign permission "database.create" to "Writer"
-    console.log('\n5. Assigning "database.create" permission to "Writer" role...');
-    // Find permission ID for database.create
-    const createDbPerm = await prisma.permission.findFirst({
-      where: { resource: 'database', action: 'create' }
-    });
-    if (!createDbPerm) {
-      throw new Error('Could not find database.create permission in DB.');
+    if (customPermA.status !== 201) {
+      throw new Error(`Failed to create custom permission in Project A: ${JSON.stringify(customPermA.body)}`);
     }
 
-    const assignPermRes = await request('POST', `/rbac/roles/${writerRole.id}/permissions`, authHeaders, {
-      permissionId: createDbPerm.id
-    });
-    if (assignPermRes.status !== 201) {
-      throw new Error(`Failed to assign permission: ${JSON.stringify(assignPermRes.body)}`);
+    // Fetch permissions for Project B
+    const permsB = await prisma.permission.findMany({ where: { projectId: projectB.id } });
+    const keysB = permsB.map(p => p.permissionKey);
+    if (keysB.includes('custom.test.perm')) {
+      throw new Error('❌ Project Isolation Failed: Custom permission of Project A found in Project B!');
     }
-    console.log('✅ Permission successfully mapped to role.');
+    console.log('✅ Project isolation verified. Permissions are strictly isolated by projectId.');
 
-    // 6. Test requirePermission middleware (Denied Request)
-    // Create a new control plane user to test access restriction (since devUser is an Admin and has full access)
-    console.log('\n6. Testing access restriction (Denied request)...');
+    // 5. Permission CRUD and Bulk Creation
+    console.log('\n5. Testing Permission CRUD and Bulk creation...');
     
+    // Bulk Creation
+    const bulkPermsRes = await request('POST', `/rbac/permissions?projectId=${projectA.id}`, authHeaders, [
+      { permissionKey: 'audit.logs.read', displayName: 'Read Audit', category: 'audit' },
+      { permissionKey: 'audit.logs.write', displayName: 'Write Audit', category: 'audit' }
+    ]);
+    if (bulkPermsRes.status !== 201) {
+      throw new Error(`Failed to bulk create permissions: ${JSON.stringify(bulkPermsRes.body)}`);
+    }
+    console.log(`- Bulk permissions created count: ${bulkPermsRes.body.data.count}`);
+
+    // Update Permission (PATCH)
+    const allPerms = await prisma.permission.findMany({ where: { projectId: projectA.id } });
+    const readAuditPerm = allPerms.find(p => p.permissionKey === 'audit.logs.read');
+    
+    const patchRes = await request('PATCH', `/rbac/permissions/${readAuditPerm.id}`, authHeaders, {
+      displayName: 'Updated Audit Read DisplayName'
+    });
+    if (patchRes.status !== 200 || patchRes.body.data.displayName !== 'Updated Audit Read DisplayName') {
+      throw new Error(`Failed to update permission: ${JSON.stringify(patchRes.body)}`);
+    }
+    console.log('✅ Permission PATCH successful.');
+
+    // Duplicate Validation
+    const dupRes = await request('POST', `/rbac/permissions?projectId=${projectA.id}`, authHeaders, {
+      permissionKey: 'audit.logs.read'
+    });
+    if (dupRes.status !== 400) {
+      throw new Error(`Expected 400 Bad Request on duplicate permissionKey but got ${dupRes.status}`);
+    }
+    console.log('✅ Duplicate permissionKey rejection validated.');
+
+    // 6. Role ↔ Permission Mapping (Bulk Assignment)
+    console.log('\n6. Testing Role-Permission assignments...');
+    const developerRole = rolesA.find(r => r.name === 'Developer');
+    const writeAuditPerm = allPerms.find(p => p.permissionKey === 'audit.logs.write');
+
+    // Bulk Map permissions to Developer role
+    const mapRes = await request('POST', `/rbac/roles/${developerRole.id}/permissions`, authHeaders, {
+      permissionIds: [readAuditPerm.id, writeAuditPerm.id]
+    });
+    if (mapRes.status !== 201) {
+      throw new Error(`Failed to map permissions to role: ${JSON.stringify(mapRes.body)}`);
+    }
+    console.log(`- Mapped count: ${mapRes.body.data.count}`);
+
+    // Get Role Permissions
+    const getRolePermsRes = await request('GET', `/rbac/roles/${developerRole.id}/permissions`, authHeaders);
+    const assignedKeys = getRolePermsRes.body.data.map(p => p.permissionKey);
+    if (!assignedKeys.includes('audit.logs.read') || !assignedKeys.includes('audit.logs.write')) {
+      throw new Error(`Assigned permissions mismatch: ${JSON.stringify(assignedKeys)}`);
+    }
+    console.log('✅ Role-Permission mappings retrieved correctly.');
+
+    // Safe deletion of a role-permission mapping
+    const deleteRolePermRes = await request('DELETE', `/rbac/roles/${developerRole.id}/permissions/${readAuditPerm.id}`, authHeaders);
+    if (deleteRolePermRes.status !== 200) {
+      throw new Error(`Failed to delete role permission mapping: ${JSON.stringify(deleteRolePermRes.body)}`);
+    }
+    console.log('✅ Permission deleted from role safely.');
+
+    // 7. User ↔ Role Assignment (Multiple Roles)
+    console.log('\n7. Testing User-Role assignments (Multiple Roles)...');
+    
+    // Create Guest developer User
     const bcrypt = require('bcryptjs');
     const passwordHash = await bcrypt.hash('guestpassword123', 10);
     const guestUserEmail = `guest_${Date.now()}@test.com`;
-    const guestUser = await prisma.user.create({
+    guestUser = await prisma.user.create({
       data: {
         tenantId: devUser.tenantId,
         name: 'Guest Developer',
@@ -152,79 +194,96 @@ async function runTests() {
         status: 'Active'
       }
     });
-    console.log(`- Created guest developer user: ${guestUser.id}`);
 
-    // Log in guest user
-    const guestLoginRes = await request('POST', '/auth/login', {}, {
+    const viewerRole = rolesA.find(r => r.name === 'Viewer');
+
+    // Assign both "Developer" and "Viewer" roles to Guest User
+    const assignUserRolesRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, authHeaders, {
+      roleIds: [developerRole.id, viewerRole.id],
+      projectId: projectA.id
+    });
+    if (assignUserRolesRes.status !== 201) {
+      throw new Error(`Failed to assign multiple roles to user: ${JSON.stringify(assignUserRolesRes.body)}`);
+    }
+
+    // Verify assigned roles
+    const getUserRolesRes = await request('GET', `/rbac/users/${guestUser.id}/roles?projectId=${projectA.id}`, authHeaders);
+    const userRoleNames = getUserRolesRes.body.data.map(ur => ur.role.name);
+    console.log(`- Guest user roles in DB: ${userRoleNames.join(', ')}`);
+    if (!userRoleNames.includes('Developer') || !userRoleNames.includes('Viewer')) {
+      throw new Error(`User roles mismatch: ${JSON.stringify(userRoleNames)}`);
+    }
+    console.log('✅ Multiple roles assigned and verified successfully.');
+
+    // 8. Test Middleware and Caching (requirePermission)
+    console.log('\n8. Testing permission resolution middleware, caching, and wildcards...');
+    
+    // Log in guest user to get access token
+    const guestLogin = await request('POST', '/auth/login', {}, {
       email: guestUserEmail,
       password: 'guestpassword123'
     });
-
-    if (guestLoginRes.status !== 200) {
-      throw new Error(`Guest user login failed: ${JSON.stringify(guestLoginRes.body)}`);
-    }
-
-    const guestToken = guestLoginRes.body.data.tokens.accessToken;
-    const guestHeaders = { 
-      'Authorization': `Bearer ${guestToken}`,
-      'x-project-id': project.id 
+    const guestHeaders = {
+      'Authorization': `Bearer ${guestLogin.body.data.tokens.accessToken}`,
+      'x-project-id': projectA.id
     };
 
-    // Request the protected test endpoint (should return 403)
-    const deniedRes = await request('GET', '/rbac/test-permission', guestHeaders);
-    console.log(`- Denied request status: ${deniedRes.status}`);
-    console.log(`- Denied response body: ${JSON.stringify(deniedRes.body)}`);
-
-    if (deniedRes.status !== 403) {
-      throw new Error(`Expected status 403 but got ${deniedRes.status}`);
-    }
-
-    // Validate exact JSON response
-    if (deniedRes.body.success !== false || deniedRes.body.message !== 'Insufficient permissions') {
-      throw new Error(`Expected response format did not match. Got: ${JSON.stringify(deniedRes.body)}`);
-    }
-    console.log('✅ Denied response format matches expectations.');
-
-    // 7. Assign User Role (Assign "Writer" role to Guest User)
-    console.log('\n7. Assigning "Writer" role to Guest User...');
-    const assignUserRoleRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, authHeaders, {
-      roleId: writerRole.id,
-      projectId: project.id
-    });
-
-    if (assignUserRoleRes.status !== 201) {
-      throw new Error(`Failed to assign role to user: ${JSON.stringify(assignUserRoleRes.body)}`);
-    }
-    console.log('✅ User role mapped successfully.');
-
-    // 8. Test requirePermission middleware (Allowed Request)
-    console.log('\n8. Testing access permission (Allowed request)...');
+    // Test Allowed Access: 'database.create' (Developer role has database.* wildcard which includes database.create)
     const allowedRes = await request('GET', '/rbac/test-permission', guestHeaders);
-    console.log(`- Allowed request status: ${allowedRes.status}`);
+    console.log(`- Request with 'database.create' status: ${allowedRes.status}`);
     if (allowedRes.status !== 200) {
       throw new Error(`Expected status 200 but got ${allowedRes.status}: ${JSON.stringify(allowedRes.body)}`);
     }
-    console.log('✅ Access granted successfully.');
+    console.log('✅ Access granted correctly via wildcard role permissions.');
 
-    // 9. Clean up resources
-    console.log('\n9. Cleaning up resources...');
-    // Delete project
-    const deleteProjRes = await request('DELETE', `/projects/${project.id}`, authHeaders);
-    if (deleteProjRes.status !== 200) {
-      console.warn('⚠️ Warning: Failed to delete project during cleanup.');
-    } else {
-      console.log('✅ Project deleted.');
+    // Test Denied Access (HTTP 403 Forbidden payload structure)
+    // Create another route validator or simulate forbidden check. 
+    // We will verify the guest user hitting an endpoint needing project.delete (which they do not have)
+    // Let's create a temporary test endpoint in the routes if needed, or hit a project delete endpoint
+    const deniedRes = await request('DELETE', `/projects/${projectB.id}`, guestHeaders);
+    console.log(`- Project B deletion request status: ${deniedRes.status}`);
+    console.log(`- Project B deletion response: ${JSON.stringify(deniedRes.body)}`);
+    if (deniedRes.status !== 403) {
+      throw new Error(`Expected status 403 but got ${deniedRes.status}`);
+    }
+    if (deniedRes.body.success !== false || deniedRes.body.message !== 'Insufficient permissions') {
+      throw new Error(`Forbidden response payload mismatch. Got: ${JSON.stringify(deniedRes.body)}`);
+    }
+    console.log('✅ 403 Forbidden response payload validated successfully.');
+
+    // 9. Transaction Rollback
+    console.log('\n9. Testing bulk transaction rollback...');
+    const rollbackRes = await request('POST', `/rbac/permissions?projectId=${projectA.id}`, authHeaders, [
+      { permissionKey: 'new.rollback.perm', displayName: 'Rollback Perm', category: 'test' },
+      { permissionKey: 'audit.logs.write', displayName: 'Conflict' } // already exists
+    ]);
+    if (rollbackRes.status !== 400) {
+      throw new Error(`Expected 400 on duplicate in bulk transaction, but got ${rollbackRes.status}`);
     }
 
-    // Delete guest user
-    await prisma.user.delete({
-      where: { id: guestUser.id }
+    // Verify that "new.rollback.perm" was NOT created (rolled back)
+    const rollbackSearch = await prisma.permission.findFirst({
+      where: { projectId: projectA.id, permissionKey: 'new.rollback.perm' }
     });
-    console.log('✅ Guest user record deleted.');
+    if (rollbackSearch) {
+      throw new Error('❌ TRANSACTION ROLLBACK FAILED! new.rollback.perm was created in DB despite transaction failure.');
+    }
+    console.log('✅ Transaction rollback confirmed (no dirty write).');
 
-    console.log('\n🎉 ALL RBAC MODULE 6 INTEGRATION TESTS PASSED SUCCESSFULLY! 🎉');
+    // 10. Clean up resources
+    console.log('\n10. Cleaning up test resources...');
+    await request('DELETE', `/projects/${projectA.id}`, authHeaders);
+    await request('DELETE', `/projects/${projectB.id}`, authHeaders);
+    await prisma.user.delete({ where: { id: guestUser.id } });
+    console.log('✅ Cleanup successful.');
+
+    console.log('\n🎉 ALL FULL RBAC INTEGRATION TESTS PASSED SUCCESSFULLY! 🎉');
   } catch (error) {
-    console.error('\n❌ RBAC INTEGRATION TESTS FAILED:\n', error);
+    console.error('\n❌ FULL RBAC INTEGRATION TESTS FAILED:\n', error);
+    // Cleanup if possible
+    if (projectA) await request('DELETE', `/projects/${projectA.id}`, { 'Authorization': `Bearer ${devToken}` }).catch(() => {});
+    if (projectB) await request('DELETE', `/projects/${projectB.id}`, { 'Authorization': `Bearer ${devToken}` }).catch(() => {});
+    if (guestUser) await prisma.user.delete({ where: { id: guestUser.id } }).catch(() => {});
     process.exit(1);
   } finally {
     await prisma.$disconnect();

@@ -6,18 +6,28 @@ const authMiddleware = require('../../middlewares/auth.middleware');
 const projectTenantMiddleware = require('../../middlewares/projectTenant.middleware');
 const projectUserAuthMiddleware = require('../../middlewares/projectUserAuth.middleware');
 const rateLimiter = require('../../middlewares/rateLimiter.middleware');
+const prisma = require('../../config/db');
 
 
 const router = express.Router();
 
 // Helper to determine if a request contains project identification headers/query
-const isProjectRequest = (req) => {
-  return !!(
-    req.headers['x-project-ref'] ||
-    req.headers['x-project-id'] ||
-    req.headers['apikey'] ||
-    req.query.apikey
-  );
+const isProjectRequest = async (req) => {
+  if (req.headers['x-project-ref'] || req.headers['x-project-id']) {
+    return true;
+  }
+  const apiKey = req.headers['apikey'] || req.query.apikey;
+  if (apiKey) {
+    try {
+      const count = await prisma.projectApiKey.count({
+        where: { keyToken: apiKey }
+      });
+      return count > 0;
+    } catch (e) {
+      return false;
+    }
+  }
+  return false;
 };
 
 // Helper to determine if the token is a project-level user JWT
@@ -47,12 +57,13 @@ router.post(
 router.post(
   '/login',
   rateLimiter({ windowMs: 15 * 60 * 1000, max: 50 }),
-  (req, res, next) => {
+  async (req, res, next) => {
     console.log('[POST /login] Request Headers:', req.headers);
     console.log('[POST /login] Request Query:', req.query);
-    console.log('[POST /login] isProjectRequest =', isProjectRequest(req));
+    const isProj = await isProjectRequest(req);
+    console.log('[POST /login] isProjectRequest =', isProj);
 
-    if (isProjectRequest(req)) {
+    if (isProj) {
       console.log('[POST /login] Dispatching: Using projectAuthController.login');
       return projectTenantMiddleware(req, res, (err) => {
         if (err) return next(err);

@@ -85,96 +85,135 @@ exports.createProject = async ({ name, tenantId, creatorId }) => {
 
     // --- AUTO-PROVISION RBAC FOR THE NEW PROJECT ---
     
-    // A. Create the project Admin role
-    const adminRole = await tx.role.create({
-      data: {
-        projectId: proj.id,
-        roleName: 'Admin',
-        name: 'Admin',
-        type: 'System',
-        createdBy: creatorId || 'System',
-        status: 'Active'
-      }
-    });
+    // Define all default permissions for the new project
+    const defaultPerms = [
+      { key: 'database.create', name: 'Create Database', category: 'database', desc: 'Create tables and schemas' },
+      { key: 'database.read', name: 'Read Database', category: 'database', desc: 'Read table records' },
+      { key: 'database.update', name: 'Update Database', category: 'database', desc: 'Update table records' },
+      { key: 'database.delete', name: 'Delete Database', category: 'database', desc: 'Delete table records' },
 
-    // B. Create the project authenticated role
-    const authenticatedRole = await tx.role.create({
-      data: {
-        projectId: proj.id,
-        roleName: 'authenticated',
-        name: 'authenticated',
-        type: 'System',
-        createdBy: creatorId || 'System',
-        status: 'Active'
-      }
-    });
+      { key: 'storage.create', name: 'Create Storage Object', category: 'storage', desc: 'Create buckets/objects' },
+      { key: 'storage.read', name: 'Read Storage Object', category: 'storage', desc: 'Read buckets/objects' },
+      { key: 'storage.update', name: 'Update Storage Object', category: 'storage', desc: 'Update buckets/objects' },
+      { key: 'storage.delete', name: 'Delete Storage Object', category: 'storage', desc: 'Delete buckets/objects' },
 
-    // C. Define default permissions
-    const defaultPermissions = [
-      // Legacy / wildcard permissions for backward compatibility
-      { resource: 'database', action: '*' },
-      { resource: 'storage', action: '*' },
-      { resource: 'users', action: '*' },
-      { resource: 'roles', action: '*' },
-      { resource: 'project', action: '*' },
-      { resource: 'database', action: 'write' },
-      { resource: 'storage', action: 'read' },
-      { resource: 'storage', action: 'write' },
+      { key: 'auth.users.read', name: 'Read Users', category: 'auth', desc: 'Read user profiles' },
+      { key: 'auth.users.create', name: 'Create Users', category: 'auth', desc: 'Create user profiles' },
+      { key: 'auth.users.update', name: 'Update Users', category: 'auth', desc: 'Update user profiles' },
+      { key: 'auth.users.delete', name: 'Delete Users', category: 'auth', desc: 'Delete user profiles' },
 
-      // Module 6 specified permissions
-      { resource: 'database', action: 'create' },
-      { resource: 'database', action: 'read' },
-      { resource: 'database', action: 'update' },
-      { resource: 'database', action: 'delete' },
-      { resource: 'storage', action: 'upload' },
-      { resource: 'storage', action: 'download' },
-      { resource: 'storage', action: 'delete' },
-      { resource: 'users', action: 'manage' },
-      { resource: 'roles', action: 'manage' },
-      { resource: 'project', action: 'settings' }
+      { key: 'rbac.roles.read', name: 'Read Roles', category: 'rbac', desc: 'Read roles' },
+      { key: 'rbac.roles.create', name: 'Create Roles', category: 'rbac', desc: 'Create custom roles' },
+      { key: 'rbac.roles.update', name: 'Update Roles', category: 'rbac', desc: 'Update custom roles' },
+      { key: 'rbac.roles.delete', name: 'Delete Roles', category: 'rbac', desc: 'Delete custom roles' },
+
+      { key: 'rbac.permissions.read', name: 'Read Permissions', category: 'rbac', desc: 'Read permissions' },
+      { key: 'rbac.permissions.assign', name: 'Assign Permissions', category: 'rbac', desc: 'Assign permissions to roles' },
+
+      { key: 'project.read', name: 'Read Project', category: 'project', desc: 'Read project settings' },
+      { key: 'project.update', name: 'Update Project', category: 'project', desc: 'Update project settings' },
+      { key: 'project.delete', name: 'Delete Project', category: 'project', desc: 'Delete project' },
+
+      // Backward compatibility wildcards & keys
+      { key: 'database.*', name: 'All Database Ops', category: 'database', desc: 'All database permissions' },
+      { key: 'storage.*', name: 'All Storage Ops', category: 'storage', desc: 'All storage permissions' },
+      { key: 'users.*', name: 'All Users Ops', category: 'users', desc: 'All users permissions' },
+      { key: 'roles.*', name: 'All Roles Ops', category: 'roles', desc: 'All roles permissions' },
+      { key: 'project.*', name: 'All Project Ops', category: 'project', desc: 'All project permissions' },
+      { key: 'database.write', name: 'Write Database', category: 'database', desc: 'Insert/Update database records' },
+      { key: 'storage.upload', name: 'Upload Storage', category: 'storage', desc: 'Upload files' },
+      { key: 'storage.download', name: 'Download Storage', category: 'storage', desc: 'Download files' },
+      { key: 'storage.write', name: 'Write Storage (Compat)', category: 'storage', desc: 'Write storage' },
+      { key: 'users.manage', name: 'Manage Users', category: 'users', desc: 'Manage user profiles' },
+      { key: 'roles.manage', name: 'Manage Roles', category: 'roles', desc: 'Manage roles' },
+      { key: 'project.settings', name: 'Project Settings', category: 'project', desc: 'Update project settings' }
     ];
 
-    // D. Upsert all permissions and map them by resource_action
+    // Seed all permissions
     const permMap = {};
-    for (const dp of defaultPermissions) {
-      const perm = await tx.permission.upsert({
-        where: {
-          resource_action: {
-            resource: dp.resource,
-            action: dp.action
-          }
-        },
-        update: {},
-        create: {
-          module: dp.resource,
-          resource: dp.resource,
-          action: dp.action
+    for (const item of defaultPerms) {
+      const perm = await tx.permission.create({
+        data: {
+          projectId: proj.id,
+          permissionKey: item.key,
+          displayName: item.name,
+          description: item.desc,
+          category: item.category,
+          status: 'Active'
         }
       });
-      permMap[`${dp.resource}.${dp.action}`] = perm.id;
+      permMap[item.key] = perm.id;
     }
 
-    // E. Associate ALL permissions with Admin role
-    await tx.rolePermission.createMany({
-      data: Object.values(permMap).map(permId => ({
-        roleId: adminRole.id,
-        permissionId: permId
-      }))
-    });
-
-    // F. Associate permissions with authenticated role
-    const authPermKeys = [
-      'database.read', 'database.write', 'database.create', 'storage.read', 'storage.write'
+    // Define all default roles and their permission keys
+    const rolesToCreate = [
+      { name: 'Admin', type: 'System', perms: defaultPerms.map(p => p.key) },
+      { name: 'Developer', type: 'System', perms: [
+        'database.*', 'database.create', 'database.read', 'database.update', 'database.delete', 'database.write',
+        'storage.*', 'storage.create', 'storage.read', 'storage.update', 'storage.delete', 'storage.upload', 'storage.download', 'storage.read', 'storage.write',
+        'auth.users.read',
+        'rbac.roles.read', 'rbac.roles.create', 'rbac.roles.update', 'rbac.roles.delete', 'roles.manage',
+        'rbac.permissions.read', 'rbac.permissions.assign',
+        'project.read'
+      ]},
+      { name: 'Manager', type: 'System', perms: [
+        'database.*', 'database.create', 'database.read', 'database.update', 'database.delete', 'database.write',
+        'storage.*', 'storage.create', 'storage.read', 'storage.update', 'storage.delete', 'storage.upload', 'storage.download', 'storage.read', 'storage.write',
+        'auth.users.read', 'auth.users.create', 'auth.users.update', 'auth.users.delete', 'users.manage',
+        'project.read', 'project.update', 'project.settings'
+      ]},
+      { name: 'User', type: 'System', perms: [
+        'database.create', 'database.read', 'database.update', 'database.write',
+        'storage.create', 'storage.read', 'storage.update', 'storage.upload', 'storage.download', 'storage.read', 'storage.write',
+        'project.read'
+      ]},
+      { name: 'authenticated', type: 'System', perms: [
+        'database.create', 'database.read', 'database.update', 'database.write',
+        'storage.create', 'storage.read', 'storage.update', 'storage.upload', 'storage.download', 'storage.read', 'storage.write',
+        'project.read'
+      ]},
+      { name: 'Viewer', type: 'System', perms: [
+        'database.read',
+        'storage.read',
+        'project.read'
+      ]}
     ];
-    await tx.rolePermission.createMany({
-      data: authPermKeys.map(key => ({
-        roleId: authenticatedRole.id,
-        permissionId: permMap[key]
-      }))
-    });
+
+    let adminRole = null;
+    for (const roleDef of rolesToCreate) {
+      const role = await tx.role.create({
+        data: {
+          projectId: proj.id,
+          roleName: roleDef.name,
+          name: roleDef.name,
+          type: roleDef.type,
+          createdBy: creatorId || 'System',
+          status: 'Active'
+        }
+      });
+
+      if (roleDef.name === 'Admin') {
+        adminRole = role;
+      }
+
+      const uniquePermKeys = Array.from(new Set(roleDef.perms));
+      const rolePermData = uniquePermKeys
+        .map(key => permMap[key])
+        .filter(Boolean)
+        .map(permId => ({
+          roleId: role.id,
+          permissionId: permId
+        }));
+
+      if (rolePermData.length > 0) {
+        await tx.rolePermission.createMany({
+          data: rolePermData
+        });
+      }
+    }
 
     // G. Assign the project creator to the Admin role
-    if (creatorId) {
+    if (creatorId && adminRole) {
       await tx.userRole.create({
         data: {
           userId: creatorId,

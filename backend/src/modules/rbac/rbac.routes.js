@@ -9,6 +9,8 @@ const projectTenantMiddleware = require('../../middlewares/projectTenant.middlew
 
 const projectUserAuthMiddleware = require('../../middlewares/projectUserAuth.middleware');
 const jwt = require('jsonwebtoken');
+const prisma = require('../../config/db');
+const encryptionService = require('../../core/services/encryption.service');
 
 const isProjectToken = (req) => {
   const authHeader = req.headers.authorization;
@@ -23,16 +25,60 @@ const isProjectToken = (req) => {
 };
 
 const dynamicRbacAuth = (req, res, next) => {
-  console.log('[dynamicRbacAuth] Attempting authorization check. Headers:', req.headers);
   const isProj = isProjectToken(req);
-  console.log('[dynamicRbacAuth] isProjectToken =', isProj);
   if (isProj) {
     return projectUserAuthMiddleware(req, res, next);
   }
   return authMiddleware(req, res, next);
 };
 
-// Apply Dynamic Authentication to all RBAC routes
+const resolveRbacProject = async (req, res, next) => {
+  if (req.project) {
+    return next();
+  }
+  try {
+    const projectRef = req.headers['x-project-ref'] || req.headers['x-project-id'] || req.query.projectId || (req.body ? req.body.projectId : null);
+    let lookup = null;
+
+    if (projectRef) {
+      lookup = projectRef;
+    } else {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+          const decoded = jwt.decode(token);
+          if (decoded) {
+            lookup = decoded.projectId || decoded.refId;
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (lookup) {
+      const project = await prisma.project.findFirst({
+        where: {
+          OR: [
+            { id: lookup },
+            { refId: lookup }
+          ]
+        }
+      });
+      if (project) {
+        try {
+          project.jwtSecret = encryptionService.decrypt(project.jwtSecretEncrypted);
+        } catch (e) {}
+        req.project = project;
+      }
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Apply Project Context Resolution and Dynamic Authentication to all RBAC routes
+router.use(resolveRbacProject);
 router.use(dynamicRbacAuth);
 
 // Endpoint for testing requirePermission middleware
@@ -45,11 +91,19 @@ router.get('/test-permission', projectTenantMiddleware, requirePermission('datab
 
 router.get('/roles', rbacController.getRoles);
 router.post('/roles', rbacController.createRole);
+
 router.get('/permissions', rbacController.getPermissions);
+router.post('/permissions', rbacController.createPermission);
+router.get('/permissions/:id', rbacController.getPermissionById);
+router.patch('/permissions/:id', rbacController.updatePermission);
+router.delete('/permissions/:id', rbacController.deletePermission);
+
 router.post('/roles/:id/permissions', rbacController.assignPermissionToRole);
+router.get('/roles/:id/permissions', rbacController.getRolePermissions);
 router.delete('/roles/:id/permissions/:permissionId', rbacController.removePermissionFromRole);
 
 router.post('/users/:userId/roles', rbacController.assignUserRole);
 router.get('/users/:userId/roles', rbacController.getUserRoles);
+router.delete('/users/:userId/roles/:roleId', rbacController.removeUserRole);
 
 module.exports = router;

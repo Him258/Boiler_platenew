@@ -1,33 +1,56 @@
 const prisma = require('../config/db');
-const { sendError } = require('../core/response');
 
 /**
- * Reusable middleware to enforce Role-Based Access Control (RBAC).
- * Enforces permissions isolated by projectId.
- * Supports wildcards (e.g., 'database.*' resource or '*' action).
- *
- * @param {string} resource - The target resource (e.g., 'database', 'storage', 'users', 'roles')
- * @param {string} action - The action to perform (e.g., 'read', 'write', 'delete', '*')
+ * Core Permission Resolution Engine middleware
+ * Resolves project-isolated permissions dynamically, supports wildcards, and caches resolved permissions on req object.
  */
-const checkPermission = (resource, action) => {
+const requirePermission = (requiredPermission) => {
   return async (req, res, next) => {
     try {
-      // 1. Ensure project context is present
+      // 1. Ensure user is authenticated
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: 'User authentication context is required.'
+        });
+      }
+
+      // 2. Ensure project context is present
       if (!req.project || !req.project.id) {
-        return sendError(res, 'Project context is required for authorization.', 'FORBIDDEN', [], 403);
+        return res.status(403).json({
+          success: false,
+          message: 'Project context is required for authorization.',
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Project context is required for authorization.'
+          }
+        });
       }
 
       const projectId = req.project.id;
-      let userRoleName = 'Guest';
-      let userPermissions = [];
 
-      // 2. Resolve user permissions based on user type
-      if (req.user) {
-        // CASE A: Control Plane User (Developer / Owner)
-        // Has req.user.userId attached by control plane authMiddleware
+      // 3. Service Role API Key bypasses checks
+      const authHeader = req.headers.authorization;
+      const apiKey = req.headers['apikey'] || req.query.apikey || (authHeader && !authHeader.startsWith('Bearer ') ? authHeader : null);
+
+      if (apiKey) {
+        const apiKeyRecord = await prisma.projectApiKey.findUnique({
+          where: { keyToken: apiKey }
+        });
+        if (apiKeyRecord && apiKeyRecord.keyType === 'service_role') {
+          return next();
+        }
+      }
+
+      // 4. Resolve and Cache Permissions
+      if (!req.resolvedPermissions) {
+        const permissionKeys = new Set();
+        let userRoleName = 'Guest';
+
         if (req.user.userId) {
+          // CASE A: Control Plane User (Developer / Owner)
           const userId = req.user.userId;
-          const userRoleMapping = await prisma.userRole.findFirst({
+          const userRoleMappings = await prisma.userRole.findMany({
             where: { userId, projectId },
             include: {
               role: {
@@ -40,24 +63,37 @@ const checkPermission = (resource, action) => {
             }
           });
 
-          if (userRoleMapping && userRoleMapping.role) {
-            userRoleName = userRoleMapping.role.name || userRoleMapping.role.roleName;
-            userPermissions = userRoleMapping.role.rolePermissions.map(rp => rp.permission);
+          // Super Admin or Owner gets universal wildcard
+          if (req.user.role === 'Super Admin' || req.user.roleId === 'Super Admin') {
+            permissionKeys.add('*');
           }
-        }
-        // CASE B: Project Plane User
-        // Has req.user.sub attached by projectUserAuthMiddleware
-        else if (req.user.sub) {
-          const roleName = req.user.role || 'authenticated';
-          userRoleName = roleName;
 
-          // Look up permissions associated with this project-isolated role name
-          const role = await prisma.role.findFirst({
+          userRoleName = userRoleMappings.map(urm => urm.role.name || urm.role.roleName).join(', ') || 'none';
+
+          for (const mapping of userRoleMappings) {
+            if (mapping.role.name === 'Admin' || mapping.role.roleName === 'Admin') {
+              permissionKeys.add('*');
+            }
+            for (const rp of mapping.role.rolePermissions) {
+              if (rp.permission.status === 'Active') {
+                permissionKeys.add(rp.permission.permissionKey);
+              }
+            }
+          }
+        } else if (req.user.sub) {
+          // CASE B: Project Plane User
+          const roleNames = Array.isArray(req.user.role) 
+            ? req.user.role 
+            : [req.user.role || 'authenticated'];
+
+          userRoleName = roleNames.join(', ');
+
+          const roles = await prisma.role.findMany({
             where: {
               projectId,
               OR: [
-                { name: roleName },
-                { roleName: roleName }
+                { name: { in: roleNames } },
+                { roleName: { in: roleNames } }
               ]
             },
             include: {
@@ -67,77 +103,103 @@ const checkPermission = (resource, action) => {
             }
           });
 
-          if (role) {
-            userPermissions = role.rolePermissions.map(rp => rp.permission);
+          for (const role of roles) {
+            if (role.name === 'Admin' || role.roleName === 'Admin') {
+              permissionKeys.add('*');
+            }
+            for (const rp of role.rolePermissions) {
+              if (rp.permission.status === 'Active') {
+                permissionKeys.add(rp.permission.permissionKey);
+              }
+            }
           }
-        }
-      } 
-      // CASE C: API Key Authentication (Fallback when no JWT is provided)
-      else {
-        const authHeader = req.headers.authorization;
-        const apiKey = req.headers['apikey'] || req.query.apikey || (authHeader && !authHeader.startsWith('Bearer ') ? authHeader : null);
-
-        if (apiKey) {
+        } else if (apiKey) {
+          // CASE C: API Key Authentication
           const apiKeyRecord = await prisma.projectApiKey.findUnique({
             where: { keyToken: apiKey }
           });
-
-          if (apiKeyRecord) {
-            if (apiKeyRecord.keyType === 'service_role') {
-              // service_role has full access bypass
-              return next();
-            } else if (apiKeyRecord.keyType === 'anon') {
-              userRoleName = 'anon';
-              // Check if project has custom permissions mapped for 'anon' role
-              const anonRole = await prisma.role.findFirst({
-                where: {
-                  projectId,
-                  OR: [
-                    { name: 'anon' },
-                    { roleName: 'anon' }
-                  ]
-                },
-                include: {
-                  rolePermissions: {
-                    include: { permission: true }
-                  }
+          if (apiKeyRecord && apiKeyRecord.keyType === 'anon') {
+            userRoleName = 'anon';
+            const anonRole = await prisma.role.findFirst({
+              where: {
+                projectId,
+                OR: [
+                  { name: 'anon' },
+                  { roleName: 'anon' }
+                ]
+              },
+              include: {
+                rolePermissions: {
+                  include: { permission: true }
                 }
-              });
+              }
+            });
 
-              if (anonRole) {
-                userPermissions = anonRole.rolePermissions.map(rp => rp.permission);
+            if (anonRole) {
+              for (const rp of anonRole.rolePermissions) {
+                if (rp.permission.status === 'Active') {
+                  permissionKeys.add(rp.permission.permissionKey);
+                }
               }
             }
           }
         }
+
+        req.resolvedPermissions = Array.from(permissionKeys);
+        req.userRoleName = userRoleName;
       }
 
-      // 3. Evaluate if user's permissions match requested resource & action
-      const hasPermission = userPermissions.some(perm => {
-        const resourceMatch = perm.resource === resource || perm.resource === '*';
-        const actionMatch = perm.action === action || perm.action === '*';
-        return resourceMatch && actionMatch;
+      // 5. Evaluate Permission Match
+      const hasPermission = req.resolvedPermissions.some(permKey => {
+        // Universal wildcard match
+        if (permKey === '*' || permKey === '*.*') {
+          return true;
+        }
+        // Perfect match
+        if (permKey === requiredPermission) {
+          return true;
+        }
+        // Wildcard match (e.g. database.* matches database.create)
+        if (permKey.endsWith('.*')) {
+          const prefix = permKey.slice(0, -2);
+          if (requiredPermission.startsWith(prefix + '.')) {
+            return true;
+          }
+        }
+        return false;
       });
 
       if (hasPermission) {
         return next();
       }
 
-      console.warn(`[RBAC] Access Denied. Project: ${projectId}, Role: ${userRoleName}, Required: ${resource}.${action}`);
+      console.warn(`[RBAC] Access Denied. Project: ${projectId}, Role: ${req.userRoleName}, Required: ${requiredPermission}`);
       return res.status(403).json({
         success: false,
+        message: 'Insufficient permissions',
         error: {
           code: 'FORBIDDEN',
           message: 'Insufficient permissions.'
         }
       });
     } catch (error) {
-      console.error('[rbacMiddleware] Authorization check failed:', error);
-      return sendError(res, 'An error occurred during permission authorization.', 'INTERNAL_ERROR', [], 500);
+      console.error('[requirePermission] Authorization check failed:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'An error occurred during permission authorization.'
+      });
     }
   };
 };
 
+/**
+ * Legacy wrapper mapping resource/action calls to permissionKeys
+ */
+const checkPermission = (resource, action) => {
+  return requirePermission(`${resource}.${action}`);
+};
+
 module.exports = {
-  checkPermission
+  checkPermission,
+  requirePermission
 };

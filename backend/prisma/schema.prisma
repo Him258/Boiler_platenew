@@ -125,24 +125,21 @@ model Role {
 }
 
 model Permission {
-  id              String           @id @default(uuid())
-  name            String?
-  module          String?
-  canView         String?
-  canCreate       String?
-  canUpdate       String?
-  canDelete       String?
-  canImport       String?
-  canExport       String?
-  canApprove      String?
-  action          String?
-  resource        String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id            String           @id @default(uuid())
+  projectId     String?
+  permissionKey String
+  displayName   String?
+  description   String?
+  category      String?
+  status        String           @default("Active")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
+  project       Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   rolePermissions RolePermission[]
 
-  @@unique([resource, action], name: "resource_action")
+  @@unique([projectId, permissionKey])
+  @@index([projectId])
 }
 
 model RolePermission {
@@ -523,6 +520,7 @@ model Project {
   storageBuckets      StorageBucket[]
   roles               Role[]
   userRoles           UserRole[]
+  permissions         Permission[]
 
   @@index([tenantId])
 }
