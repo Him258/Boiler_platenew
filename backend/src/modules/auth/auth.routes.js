@@ -27,6 +27,18 @@ const isProjectRequest = async (req) => {
       return false;
     }
   }
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.decode(token);
+      if (decoded && (decoded.projectId || decoded.refId)) {
+        return true;
+      }
+    } catch (e) {
+      return false;
+    }
+  }
   return false;
 };
 
@@ -45,12 +57,20 @@ const isProjectToken = (req) => {
 
 
 
-// Signup (Only for project users, rate limited)
+// Signup (Dispatches control plane or project plane auth)
 router.post(
   '/signup',
   rateLimiter({ windowMs: 15 * 60 * 1000, max: 20 }),
-  projectTenantMiddleware,
-  projectAuthController.signup
+  async (req, res, next) => {
+    const isProj = await isProjectRequest(req);
+    if (isProj) {
+      return projectTenantMiddleware(req, res, (err) => {
+        if (err) return next(err);
+        return projectAuthController.signup(req, res, next);
+      });
+    }
+    return authController.register(req, res, next);
+  }
 );
 
 // Login (Dispatches control plane or project plane auth)

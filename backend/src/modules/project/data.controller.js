@@ -119,7 +119,7 @@ exports.getRecord = async (req, res) => {
       return sendError(res, 'Access denied or project not found', 'FORBIDDEN', [], 403);
     }
 
-    const record = await dataService.getRecord(project, tableName, id);
+    const record = await dataService.getRecord(project, tableName, id, req.rlsConstraints);
 
     console.log(`[DataController.getRecord] Completed in ${Date.now() - startTime}ms`);
     return sendSuccess(res, 'Record retrieved successfully', record);
@@ -153,7 +153,7 @@ exports.updateRecord = async (req, res) => {
       return sendError(res, 'Access denied or project not found', 'FORBIDDEN', [], 403);
     }
 
-    const record = await dataService.updateRecord(project, tableName, id, req.body);
+    const record = await dataService.updateRecord(project, tableName, id, req.body, req.rlsConstraints);
 
     // Audit Logging
     const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -199,7 +199,7 @@ exports.deleteRecord = async (req, res) => {
       return sendError(res, 'Access denied or project not found', 'FORBIDDEN', [], 403);
     }
 
-    const record = await dataService.deleteRecord(project, tableName, id);
+    const record = await dataService.deleteRecord(project, tableName, id, req.rlsConstraints);
 
     // Audit Logging
     const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -263,7 +263,8 @@ exports.listRecords = async (req, res) => {
       search,
       select,
       count,
-      filters
+      filters,
+      rlsConstraints: req.rlsConstraints
     });
 
     console.log(`[DataController.listRecords] Completed in ${Date.now() - startTime}ms`);

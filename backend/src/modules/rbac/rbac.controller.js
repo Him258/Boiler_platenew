@@ -1,10 +1,61 @@
 const rbacService = require('./rbac.service');
 const { sendSuccess, sendError } = require('../../core/response');
+const jwt = require('jsonwebtoken');
+const prisma = require('../../config/db');
+
+const resolveProjectId = async (req, userId = null, roleIds = []) => {
+  if (req.project && req.project.id) {
+    return req.project.id;
+  }
+  if (req.user && req.user.projectId) {
+    return req.user.projectId;
+  }
+  
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.decode(token);
+      if (decoded) {
+        const pId = decoded.projectId || decoded.refId;
+        if (pId) return pId;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  
+  const bodyQueryId = req.body?.projectId || req.query?.projectId || req.body?.project || req.query?.project;
+  if (bodyQueryId) return bodyQueryId;
+
+  // Target user's projectId from database
+  if (userId) {
+    const userRole = await prisma.userRole.findFirst({ where: { userId } });
+    if (userRole && userRole.projectId) {
+      return userRole.projectId;
+    }
+  }
+
+  // Role's projectId from database
+  if (roleIds && roleIds.length > 0) {
+    const role = await prisma.role.findFirst({
+      where: {
+        id: { in: roleIds },
+        projectId: { not: null }
+      }
+    });
+    if (role && role.projectId) {
+      return role.projectId;
+    }
+  }
+  
+  return null;
+};
 
 class RbacController {
   async getRoles(req, res) {
     try {
-      const projectId = req.query.projectId || req.query.project || (req.project ? req.project.id : null);
+      const projectId = await resolveProjectId(req);
       const roles = await rbacService.getRoles(projectId);
       return sendSuccess(res, 'Roles retrieved successfully', roles);
     } catch (error) {
@@ -15,7 +66,7 @@ class RbacController {
   async createRole(req, res) {
     try {
       const body = req.body;
-      const projectId = req.query.projectId || (req.project ? req.project.id : null);
+      const projectId = await resolveProjectId(req);
 
       // Handle Bulk Creation
       if (Array.isArray(body)) {
@@ -49,7 +100,7 @@ class RbacController {
       // Handle Single Creation
       else if (body && typeof body === 'object') {
         const { name, description } = body;
-        const resolvedProjectId = body.projectId || projectId;
+        const resolvedProjectId = await resolveProjectId(req);
 
         if (!name || typeof name !== 'string' || !name.trim()) {
           return sendError(res, 'Role name is required', 'VALIDATION_ERROR', [], 400);
@@ -72,7 +123,7 @@ class RbacController {
 
   async getPermissions(req, res) {
     try {
-      const projectId = req.query.projectId || (req.project ? req.project.id : null);
+      const projectId = await resolveProjectId(req);
       const permissions = await rbacService.getPermissions(projectId);
       return sendSuccess(res, 'Permissions retrieved successfully', permissions);
     } catch (error) {
@@ -96,7 +147,7 @@ class RbacController {
   async createPermission(req, res) {
     try {
       const body = req.body;
-      const projectId = req.query.projectId || (req.project ? req.project.id : null);
+      const projectId = await resolveProjectId(req);
 
       // Handle Bulk Creation
       if (Array.isArray(body)) {
@@ -130,7 +181,7 @@ class RbacController {
       // Handle Single Creation
       else if (body && typeof body === 'object') {
         const { permissionKey, displayName, description, category, status } = body;
-        const resolvedProjectId = body.projectId || projectId;
+        const resolvedProjectId = await resolveProjectId(req);
 
         if (!permissionKey || typeof permissionKey !== 'string' || !permissionKey.trim()) {
           return sendError(res, 'Permission key is required', 'VALIDATION_ERROR', [], 400);
@@ -236,7 +287,6 @@ class RbacController {
   async assignUserRole(req, res) {
     try {
       const { userId } = req.params;
-      const projectId = req.body.projectId || req.query.projectId || (req.project ? req.project.id : null);
 
       let roleIds = [];
       if (Array.isArray(req.body)) {
@@ -253,17 +303,61 @@ class RbacController {
         return sendError(res, 'Role ID(s) are required', 'VALIDATION_ERROR', [], 400);
       }
 
+      // 1. Verify User exists
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        return sendError(res, 'User not found.', 'VALIDATION_ERROR', [], 400);
+      }
+
+      // 2. Resolve projectId
+      const projectId = await resolveProjectId(req, userId, roleIds);
+      if (!projectId) {
+        return sendError(res, 'ProjectId is required to associate roles with a user.', 'VALIDATION_ERROR', [], 400);
+      }
+
+      // 3. Verify Project exists
+      const project = await prisma.project.findUnique({ where: { id: projectId } });
+      if (!project) {
+        return sendError(res, 'Project not found.', 'VALIDATION_ERROR', [], 400);
+      }
+
+      // 4. Verify Roles exist and belong to the same projectId (or are global/null projectId)
+      const roles = await prisma.role.findMany({
+        where: {
+          id: { in: roleIds }
+        }
+      });
+
+      if (roles.length !== roleIds.length) {
+        return sendError(res, 'One or more role IDs are invalid.', 'VALIDATION_ERROR', [], 400);
+      }
+
+      for (const role of roles) {
+        if (role.projectId && role.projectId !== projectId) {
+          return sendError(res, 'Role belongs to a different project than the resolved project context.', 'VALIDATION_ERROR', [], 400);
+        }
+      }
+
+      // 5. Verify target user does not have roles in a different project
+      const existingUserRoles = await prisma.userRole.findMany({ where: { userId } });
+      if (existingUserRoles.length > 0) {
+        const existingProjectId = existingUserRoles[0].projectId;
+        if (existingProjectId !== projectId) {
+          return sendError(res, 'Cross-project role assignment is not allowed.', 'VALIDATION_ERROR', [], 400);
+        }
+      }
+
       const association = await rbacService.assignUserRoles({ userId, roleIds, projectId });
       return sendSuccess(res, 'Role(s) assigned to user successfully', association, null, 201);
     } catch (error) {
-      return sendError(res, error.message || 'Failed to assign role to user', 'INTERNAL_ERROR', [], 500);
+      return sendError(res, error.message || 'Failed to assign role to user', 'VALIDATION_ERROR', [], 400);
     }
   }
 
   async removeUserRole(req, res) {
     try {
       const { userId, roleId } = req.params;
-      const projectId = req.query.projectId || (req.project ? req.project.id : null);
+      const projectId = await resolveProjectId(req, userId, [roleId]);
       await rbacService.removeUserRole(userId, roleId, projectId);
       return sendSuccess(res, 'Role removed from user successfully');
     } catch (error) {
@@ -274,11 +368,29 @@ class RbacController {
   async getUserRoles(req, res) {
     try {
       const { userId } = req.params;
-      const projectId = req.query.projectId || req.query.project || (req.project ? req.project.id : null);
+      const projectId = await resolveProjectId(req, userId);
       const userRoles = await rbacService.getUserRoles(userId, projectId);
       return sendSuccess(res, 'User roles retrieved successfully', userRoles);
     } catch (error) {
       return sendError(res, error.message || 'Failed to retrieve user roles', 'INTERNAL_ERROR', [], 500);
+    }
+  }
+
+  async getUserPermissions(req, res) {
+    try {
+      const { userId } = req.params;
+      const projectId = await resolveProjectId(req, userId);
+
+      // 1. Verify User exists
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        return sendError(res, 'User not found.', 'VALIDATION_ERROR', [], 400);
+      }
+
+      const permissions = await rbacService.getUserPermissions(userId, projectId);
+      return sendSuccess(res, 'User permissions retrieved successfully', permissions);
+    } catch (error) {
+      return sendError(res, error.message || 'Failed to retrieve user permissions', 'INTERNAL_ERROR', [], 500);
     }
   }
 }

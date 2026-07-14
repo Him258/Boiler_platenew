@@ -129,7 +129,8 @@ exports.listRecords = async (req, res) => {
       search,
       select,
       count,
-      filters
+      filters,
+      rlsConstraints: req.rlsConstraints
     });
 
     console.log(`[DatabaseController.listRecords] Completed in ${Date.now() - startTime}ms`);
@@ -158,7 +159,7 @@ exports.updateRecord = async (req, res) => {
       return sendError(res, 'Table name and record ID are required', 'VALIDATION_ERROR', [], 400);
     }
 
-    const record = await dataService.updateRecord(project, tableName, id, req.body);
+    const record = await dataService.updateRecord(project, tableName, id, req.body, req.rlsConstraints);
 
     // Audit Logging
     const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -200,7 +201,7 @@ exports.deleteRecord = async (req, res) => {
       return sendError(res, 'Table name and record ID are required', 'VALIDATION_ERROR', [], 400);
     }
 
-    const record = await dataService.deleteRecord(project, tableName, id);
+    const record = await dataService.deleteRecord(project, tableName, id, req.rlsConstraints);
 
     // Audit Logging
     const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -228,5 +229,35 @@ exports.deleteRecord = async (req, res) => {
     }
 
     return sendError(res, error.message || 'Failed to delete record', 'INTERNAL_ERROR', [], 500);
+  }
+};
+
+exports.getRecord = async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { table: tableName, id } = req.params;
+    const project = req.project;
+
+    if (!tableName || !id) {
+      return sendError(res, 'Table name and record ID are required', 'VALIDATION_ERROR', [], 400);
+    }
+
+    const record = await dataService.getRecord(project, tableName, id, req.rlsConstraints);
+
+    console.log(`[DatabaseController.getRecord] Completed in ${Date.now() - startTime}ms`);
+    return sendSuccess(res, 'Record retrieved successfully', record);
+  } catch (error) {
+    console.error('[DatabaseController.getRecord] Error:', error);
+
+    if (error.message.includes('not found') || error.message.includes('access denied')) {
+      return sendError(res, error.message, 'NOT_FOUND', [], 404);
+    }
+
+    if (error.message.includes('Invalid database identifier') ||
+        error.message.includes('restricted')) {
+      return sendError(res, error.message, 'VALIDATION_ERROR', [], 400);
+    }
+
+    return sendError(res, error.message || 'Failed to retrieve record', 'INTERNAL_ERROR', [], 500);
   }
 };

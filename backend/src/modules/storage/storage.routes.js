@@ -1,9 +1,10 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const storageController = require('./storage.controller');
 const storageMiddleware = require('./storage.middleware');
 const projectTenantMiddleware = require('../../middlewares/projectTenant.middleware');
 const authMiddleware = require('../../middlewares/auth.middleware');
+const { checkPermission } = require('../../middlewares/rbac.middleware');
+const jwt = require('jsonwebtoken');
 
 const router = express.Router();
 
@@ -49,30 +50,21 @@ const dynamicDatabaseAuth = (req, res, next) => {
   return authMiddleware(req, res, next);
 };
 
-// 1. Unauthenticated storage downloads (still resolves project context using apikey)
-router.get('/object/public/:bucketName/*path', projectTenantMiddleware, storageController.downloadPublicFile);
-router.get('/object/signed/:bucketName/*path', projectTenantMiddleware, storageController.downloadSignedFile);
-
-const { checkPermission } = require('../../middlewares/rbac.middleware');
-
-// 2. Authenticated storage endpoints (requires apikey + dynamic jwt token)
+// All endpoints require apikey/tenant mapping and authentication
 router.use(projectTenantMiddleware);
 router.use(dynamicDatabaseAuth);
 
-// Bucket Operations
-router.post('/bucket', checkPermission('storage', 'write'), storageController.createBucket);
-router.get('/bucket', checkPermission('storage', 'read'), storageController.listBuckets);
-router.delete('/bucket/:bucketName', checkPermission('storage', 'write'), storageController.deleteBucket);
+// --- Bucket Routes ---
+router.post('/buckets', checkPermission('storage', 'create'), storageController.createBucket);
+router.get('/buckets', checkPermission('storage', 'read'), storageController.listBuckets);
+router.get('/buckets/:id', checkPermission('storage', 'read'), storageController.getBucket);
+router.put('/buckets/:id', checkPermission('storage', 'update'), storageController.updateBucket);
+router.delete('/buckets/:id', checkPermission('storage', 'delete'), storageController.deleteBucket);
 
-// Object Bulk Operations
-router.post('/object/move', checkPermission('storage', 'write'), storageController.moveFile);
-router.post('/object/copy', checkPermission('storage', 'write'), storageController.copyFile);
-router.get('/object/list/:bucketName', checkPermission('storage', 'read'), storageController.listFiles);
-router.post('/object/sign/:bucketName/*path', checkPermission('storage', 'read'), storageController.generateSignedUrl);
-
-// Standard File CRUD
-router.post('/object/:bucketName/*path', checkPermission('storage', 'write'), storageMiddleware.uploadSingle, storageController.uploadFile);
-router.get('/object/:bucketName/*path', checkPermission('storage', 'read'), storageController.downloadFile);
-router.delete('/object/:bucketName/*path', checkPermission('storage', 'write'), storageController.deleteFile);
+// --- File Routes ---
+router.post('/upload', checkPermission('storage', 'upload'), storageMiddleware.uploadSingle, storageController.uploadFile);
+router.get('/files', checkPermission('storage', 'read'), storageController.listFiles);
+router.get('/files/:id', checkPermission('storage', 'read'), storageController.getFile);
+router.delete('/files/:id', checkPermission('storage', 'delete'), storageController.deleteFile);
 
 module.exports = router;

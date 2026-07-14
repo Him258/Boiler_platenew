@@ -518,9 +518,13 @@ model Project {
   authProviders       ProjectAuthProvider[]
   emailTemplates      ProjectEmailTemplate[]
   storageBuckets      StorageBucket[]
+  storageObjects      StorageObject[]
+  storageLimit        BigInt          @default(1073741824) // 1GB default
+  storageUsed         BigInt          @default(0)
   roles               Role[]
   userRoles           UserRole[]
   permissions         Permission[]
+  rlsPolicies         RlsPolicy[]
 
   @@index([tenantId])
 }
@@ -567,38 +571,56 @@ model ProjectEmailTemplate {
 }
 
 model StorageBucket {
-  id        String   @id @default(uuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  name      String
-  isPublic  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name         String
+  description  String?  @db.Text
+  isPublic     Boolean  @default(false)
+  storageLimit BigInt?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  files     StorageFile[]
+  files        StorageObject[]
 
   @@unique([projectId, name])
   @@index([projectId])
 }
 
-model StorageFile {
-  id               String        @id @default(uuid())
-  projectId        String
-  bucketId         String
-  bucket           StorageBucket @relation(fields: [bucketId], references: [id], onDelete: Cascade)
-  originalName     String
-  storedName       String
-  path             String
-  mimeType         String
-  extension        String
-  size             Int
-  uploadedBy       String?
-  visibility       String
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+model StorageObject {
+  id         String        @id @default(uuid())
+  projectId  String
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bucketId   String
+  bucket     StorageBucket @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  fileName   String
+  filePath   String
+  fileUrl    String?       @db.Text
+  mimeType   String
+  size       Int
+  uploadedBy String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 
-  @@unique([bucketId, path])
+  @@unique([bucketId, filePath])
   @@index([projectId])
   @@index([bucketId])
+}
+
+model RlsPolicy {
+  id         String   @id @default(uuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tableName  String
+  policyName String
+  operation  String
+  role       String
+  condition  String   @db.Text
+  enabled    Boolean  @default(true)
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId])
 }
 

@@ -49,15 +49,16 @@ const dynamicDatabaseAuth = (req, res, next) => {
 };
 
 const { checkPermission } = require('../../middlewares/rbac.middleware');
+const checkRowPermission = require('../../middlewares/rls.middleware');
 
 // Route mapping gates
 router.use(projectTenantMiddleware);
 router.use(dynamicDatabaseAuth);
 
 router.post('/tables', checkPermission('database', 'create'), databaseController.createTable);
-router.post('/:table', checkPermission('database', 'write'), databaseController.insertRecord);
-router.get('/:table', checkPermission('database', 'read'), databaseController.listRecords);
-router.patch('/:table/:id', checkPermission('database', 'write'), databaseController.updateRecord);
-router.delete('/:table/:id', checkPermission('database', 'write'), databaseController.deleteRecord);
+router.post('/:table', checkPermission('database', 'write'), checkRowPermission, databaseController.insertRecord);
+router.get('/:table', checkPermission('database', 'read'), checkRowPermission, databaseController.listRecords);
+router.patch('/:table/:id', checkPermission('database', 'write'), checkRowPermission, databaseController.updateRecord);
+router.delete('/:table/:id', checkPermission('database', 'write'), checkRowPermission, databaseController.deleteRecord);
 
 module.exports = router;

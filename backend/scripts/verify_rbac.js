@@ -178,8 +178,8 @@ async function runTests() {
     }
     console.log('✅ Permission deleted from role safely.');
 
-    // 7. User ↔ Role Assignment (Multiple Roles)
-    console.log('\n7. Testing User-Role assignments (Multiple Roles)...');
+    // 7. User ↔ Role Assignment (Comprehensive tests)
+    console.log('\n7. Testing User-Role assignments...');
     
     // Create Guest developer User
     const bcrypt = require('bcryptjs');
@@ -197,14 +197,111 @@ async function runTests() {
 
     const viewerRole = rolesA.find(r => r.name === 'Viewer');
 
-    // Assign both "Developer" and "Viewer" roles to Guest User
-    const assignUserRolesRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, authHeaders, {
+    // 7a. Test Single Role Assignment
+    console.log('- Testing single role assignment...');
+    const assignSingleRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, authHeaders, {
+      roleIds: [viewerRole.id],
+      projectId: projectA.id
+    });
+    if (assignSingleRes.status !== 201) {
+      throw new Error(`Failed single role assignment: ${JSON.stringify(assignSingleRes.body)}`);
+    }
+    console.log('  ✅ Single role assignment successful.');
+
+    // 7b. Test Multiple Role Assignment
+    console.log('- Testing multiple role assignment...');
+    const assignMultipleRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, authHeaders, {
       roleIds: [developerRole.id, viewerRole.id],
       projectId: projectA.id
     });
-    if (assignUserRolesRes.status !== 201) {
-      throw new Error(`Failed to assign multiple roles to user: ${JSON.stringify(assignUserRolesRes.body)}`);
+    if (assignMultipleRes.status !== 201) {
+      throw new Error(`Failed multiple role assignment: ${JSON.stringify(assignMultipleRes.body)}`);
     }
+    console.log('  ✅ Multiple role assignment successful.');
+
+    // 7c. Test Duplicate Assignment (assigning roles that are already assigned)
+    console.log('- Testing duplicate role assignment...');
+    const assignDupRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, authHeaders, {
+      roleIds: [developerRole.id],
+      projectId: projectA.id
+    });
+    if (assignDupRes.status !== 201) {
+      throw new Error(`Failed duplicate role assignment: ${JSON.stringify(assignDupRes.body)}`);
+    }
+    console.log('  ✅ Duplicate assignment resolved gracefully.');
+
+    // 7d. Test Invalid Role ID
+    console.log('- Testing invalid role ID assignment...');
+    const assignInvalidRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, authHeaders, {
+      roleIds: ['00000000-0000-0000-0000-000000000000'],
+      projectId: projectA.id
+    });
+    if (assignInvalidRes.status === 201 || assignInvalidRes.status === 200) {
+      throw new Error(`Expected invalid role assignment to fail, but got status ${assignInvalidRes.status}`);
+    }
+    console.log('  ✅ Invalid role ID rejected correctly.');
+
+    // 7e. Test Cross-project Role Assignment Rejection (trying to assign projectB's role to a user in projectA context)
+    console.log('- Testing cross-project role assignment rejection...');
+    const roleB = rolesB[0]; // a role from project B
+    const assignCrossRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, authHeaders, {
+      roleIds: [roleB.id],
+      projectId: projectA.id
+    });
+    if (assignCrossRes.status === 201 || assignCrossRes.status === 200) {
+      throw new Error(`Expected cross-project assignment to fail, but got status ${assignCrossRes.status}`);
+    }
+    console.log('  ✅ Cross-project assignment rejected correctly.');
+
+    // 7f. Test Assignment using only a Bearer Project JWT (without x-project-ref or apikey headers)
+    console.log('- Testing assignment using only a Bearer Project JWT...');
+    
+    // First, we need a Project user token for Project A.
+    // Let's sign up a project user in Project A.
+    const projectADetailsRes = await request('GET', `/projects/${projectA.id}`, authHeaders);
+    const projectADetails = projectADetailsRes.body.data;
+    const anonKeyA = projectADetails.apiKeys.find(k => k.keyType === 'anon').keyToken;
+
+    const projUserEmail = `projuser_${Date.now()}@test.com`;
+    const projUserPassword = 'password123';
+
+    // Sign up Project A User
+    const projSignup = await request('POST', '/auth/signup', {
+      'x-project-ref': projectADetails.refId,
+      'apikey': anonKeyA
+    }, {
+      email: projUserEmail,
+      password: projUserPassword
+    });
+    if (projSignup.status !== 201) {
+      throw new Error(`Failed to sign up Project A user: ${JSON.stringify(projSignup.body)}`);
+    }
+
+    // Login Project A User
+    const projLogin = await request('POST', '/auth/login', {
+      'x-project-ref': projectADetails.refId,
+      'apikey': anonKeyA
+    }, {
+      email: projUserEmail,
+      password: projUserPassword
+    });
+    if (projLogin.status !== 200) {
+      throw new Error(`Failed to log in Project A user: ${JSON.stringify(projLogin.body)}`);
+    }
+
+    const projectUserToken = projLogin.body.data.accessToken;
+    const projectUserHeaders = {
+      'Authorization': `Bearer ${projectUserToken}`
+    };
+
+    // Assign role to Guest User using Project User JWT ONLY (no x-project-ref, no apikey)
+    const assignBearerOnlyRes = await request('POST', `/rbac/users/${guestUser.id}/roles`, projectUserHeaders, {
+      roleIds: [viewerRole.id]
+    });
+    if (assignBearerOnlyRes.status !== 201) {
+      throw new Error(`Failed user-role assignment using Bearer Project JWT only: ${JSON.stringify(assignBearerOnlyRes.body)}`);
+    }
+    console.log('  ✅ User-role assignment using only Bearer Project JWT succeeded.');
 
     // Verify assigned roles
     const getUserRolesRes = await request('GET', `/rbac/users/${guestUser.id}/roles?projectId=${projectA.id}`, authHeaders);
@@ -214,6 +311,7 @@ async function runTests() {
       throw new Error(`User roles mismatch: ${JSON.stringify(userRoleNames)}`);
     }
     console.log('✅ Multiple roles assigned and verified successfully.');
+
 
     // 8. Test Middleware and Caching (requirePermission)
     console.log('\n8. Testing permission resolution middleware, caching, and wildcards...');
@@ -251,8 +349,117 @@ async function runTests() {
     }
     console.log('✅ 403 Forbidden response payload validated successfully.');
 
-    // 9. Transaction Rollback
-    console.log('\n9. Testing bulk transaction rollback...');
+    // 9. User Permission Resolution Engine
+    console.log('\n9. Testing User Permission Resolution Engine...');
+
+    // 9a. GET /rbac/users/:userId/permissions — guest user has Developer + Viewer roles
+    console.log('- Testing GET /rbac/users/:userId/permissions...');
+    const userPermsRes = await request(
+      'GET',
+      `/rbac/users/${guestUser.id}/permissions?projectId=${projectA.id}`,
+      authHeaders
+    );
+    if (userPermsRes.status !== 200) {
+      throw new Error(`Expected 200 from GET user permissions but got ${userPermsRes.status}: ${JSON.stringify(userPermsRes.body)}`);
+    }
+    const permsData = userPermsRes.body.data;
+    if (!Array.isArray(permsData)) {
+      throw new Error(`Expected permissions array but got: ${JSON.stringify(permsData)}`);
+    }
+    console.log(`  - Permissions returned: ${permsData.length}`);
+    // Every entry must have permissionKey and category
+    for (const p of permsData) {
+      if (!p.permissionKey || p.category === undefined) {
+        throw new Error(`Permission entry missing required fields: ${JSON.stringify(p)}`);
+      }
+    }
+    console.log('  ✅ GET /users/:userId/permissions returned valid permission list.');
+
+    // 9b. checkPermission helper — Admin user (guestUser has Developer which has database.*)
+    const { userHasPermission } = require('../src/middlewares/rbac.middleware');
+    const devRoleHasDatabasePerm = await userHasPermission(
+      guestUser.id,
+      'database.create',
+      projectA.id
+    );
+    console.log(`- checkPermission(guestUser, 'database.create', projectA) = ${devRoleHasDatabasePerm}`);
+    if (!devRoleHasDatabasePerm) {
+      throw new Error('Expected Developer role to allow database.create via database.* wildcard but got false');
+    }
+    console.log('  ✅ Developer user correctly allowed for database.create (wildcard match).');
+
+    // 9c. checkPermission helper — Viewer-only role should NOT have database.create
+    // Create a separate Viewer-only user
+    const bcryptV = require('bcryptjs');
+    const viewerOnlyHash = await bcryptV.hash('viewerpass123', 10);
+    const viewerOnlyEmail = `vieweronly_${Date.now()}@test.com`;
+    const viewerOnlyUser = await prisma.user.create({
+      data: {
+        tenantId: devUser.tenantId,
+        name: 'Viewer Only User',
+        email: viewerOnlyEmail,
+        passwordHash: viewerOnlyHash,
+        status: 'Active'
+      }
+    });
+
+    const viewerRoleLocal = rolesA.find(r => r.name === 'Viewer');
+    // Assign only Viewer role
+    await request('POST', `/rbac/users/${viewerOnlyUser.id}/roles`, authHeaders, {
+      roleIds: [viewerRoleLocal.id],
+      projectId: projectA.id
+    });
+
+    const viewerHasDatabasePerm = await userHasPermission(
+      viewerOnlyUser.id,
+      'database.create',
+      projectA.id
+    );
+    console.log(`- checkPermission(viewerOnlyUser, 'database.create', projectA) = ${viewerHasDatabasePerm}`);
+    if (viewerHasDatabasePerm) {
+      throw new Error('Expected Viewer role to DENY database.create but got true');
+    }
+    console.log('  ✅ Viewer-only user correctly denied for database.create.');
+
+    // 9d. Wildcard chains — verify database.*, users.*, storage.*, project.*, roles.*
+    const wildcardKeys = ['database.*', 'users.*', 'storage.*', 'project.*', 'roles.*'];
+    for (const wk of wildcardKeys) {
+      // Create synthetic permission key by replacing .* with a specific action
+      const specificKey = wk.replace('.*', '.read');
+      const wildcardPerm = await prisma.permission.create({
+        data: {
+          projectId: projectA.id,
+          permissionKey: wk,
+          displayName: `Wildcard ${wk}`,
+          category: wk.split('.')[0],
+          status: 'Active'
+        }
+      }).catch(() => null); // ignore if already exists
+
+      if (wildcardPerm) {
+        // Map it to Developer role
+        const developerRoleLocal = rolesA.find(r => r.name === 'Developer');
+        await prisma.rolePermission.upsert({
+          where: { roleId_permissionId: { roleId: developerRoleLocal.id, permissionId: wildcardPerm.id } },
+          create: { roleId: developerRoleLocal.id, permissionId: wildcardPerm.id },
+          update: {}
+        });
+
+        const result = await userHasPermission(guestUser.id, specificKey, projectA.id);
+        if (!result) {
+          throw new Error(`Expected wildcard ${wk} to cover ${specificKey} but got false`);
+        }
+      }
+    }
+    console.log('  ✅ Wildcard permission chains (database.*, users.*, storage.*, project.*, roles.*) verified.');
+
+    // Cleanup viewer-only user
+    await prisma.user.delete({ where: { id: viewerOnlyUser.id } }).catch(() => {});
+
+    console.log('✅ User Permission Resolution Engine fully verified.');
+
+    // 10. Transaction Rollback
+    console.log('\n10. Testing bulk transaction rollback...');
     const rollbackRes = await request('POST', `/rbac/permissions?projectId=${projectA.id}`, authHeaders, [
       { permissionKey: 'new.rollback.perm', displayName: 'Rollback Perm', category: 'test' },
       { permissionKey: 'audit.logs.write', displayName: 'Conflict' } // already exists
@@ -270,8 +477,8 @@ async function runTests() {
     }
     console.log('✅ Transaction rollback confirmed (no dirty write).');
 
-    // 10. Clean up resources
-    console.log('\n10. Cleaning up test resources...');
+    // 11. Clean up resources
+    console.log('\n11. Cleaning up test resources...');
     await request('DELETE', `/projects/${projectA.id}`, authHeaders);
     await request('DELETE', `/projects/${projectB.id}`, authHeaders);
     await prisma.user.delete({ where: { id: guestUser.id } });

@@ -193,13 +193,96 @@ const requirePermission = (requiredPermission) => {
 };
 
 /**
- * Legacy wrapper mapping resource/action calls to permissionKeys
+ * Directly evaluates whether a user has the required permission.
+ * Loads all roles and their permissions from the database and applies wildcard matching.
+ *
+ * @param {string} userId - The control-plane user ID to check.
+ * @param {string} permissionKey - The required permission key (e.g. "database.create").
+ * @param {string|null} projectId - Optional project scope filter.
+ * @returns {Promise<boolean>} true if the user is allowed, false otherwise.
  */
-const checkPermission = (resource, action) => {
-  return requirePermission(`${resource}.${action}`);
+const userHasPermission = async (userId, permissionKey, projectId = null) => {
+  try {
+    // Fetch the user to check for Super Admin role
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return false;
+
+    // Super Admin gets universal access
+    if (user.role === 'Super Admin') return true;
+
+    const where = { userId };
+    if (projectId) where.projectId = projectId;
+
+    const userRoles = await prisma.userRole.findMany({
+      where,
+      include: {
+        role: {
+          include: {
+            rolePermissions: {
+              include: { permission: true }
+            }
+          }
+        }
+      }
+    });
+
+    const permissionKeys = new Set();
+
+    for (const mapping of userRoles) {
+      const role = mapping.role;
+      if (!role) continue;
+
+      // Admin role gets universal wildcard
+      if (role.name === 'Admin' || role.roleName === 'Admin') {
+        permissionKeys.add('*');
+      }
+
+      for (const rp of role.rolePermissions) {
+        if (rp.permission && rp.permission.status === 'Active') {
+          permissionKeys.add(rp.permission.permissionKey);
+        }
+      }
+    }
+
+    return Array.from(permissionKeys).some(permKey => {
+      if (permKey === '*' || permKey === '*.*') return true;
+      if (permKey === permissionKey) return true;
+      if (permKey.endsWith('.*')) {
+        const prefix = permKey.slice(0, -2);
+        if (permissionKey.startsWith(prefix + '.')) return true;
+      }
+      return false;
+    });
+  } catch (err) {
+    console.error('[userHasPermission] Error:', err);
+    return false;
+  }
+};
+
+/**
+ * Dual-mode helper:
+ *
+ * Mode 1 — Route middleware factory (existing behaviour, unchanged):
+ *   checkPermission('database', 'create')  →  returns Express middleware
+ *
+ * Mode 2 — Direct async permission evaluator:
+ *   await checkPermission(userId, 'database.create')          → boolean
+ *   await checkPermission(userId, 'database.create', projId)  → boolean
+ *
+ * Detection: if arg1 looks like a UUID (contains hyphens and length > 20),
+ * it is treated as a userId and the call enters Mode 2.
+ */
+const checkPermission = (arg1, arg2, arg3 = null) => {
+  // Mode 2: direct async check — checkPermission(userId, permissionKey, projectId?)
+  if (typeof arg1 === 'string' && arg1.includes('-') && arg1.length > 20) {
+    return userHasPermission(arg1, arg2, arg3);
+  }
+  // Mode 1: middleware factory — checkPermission(resource, action)
+  return requirePermission(`${arg1}.${arg2}`);
 };
 
 module.exports = {
   checkPermission,
-  requirePermission
+  requirePermission,
+  userHasPermission
 };

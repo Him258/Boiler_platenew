@@ -65,7 +65,18 @@ const projectTenantMiddleware = async (req, res, next) => {
         include: { project: true }
       });
       if (!apiKeyRecord || !apiKeyRecord.project) {
-        if (bearerToken) {
+        // Fallback to projectRef first, then bearerToken
+        if (projectRef) {
+          project = await prisma.project.findFirst({
+            where: {
+              OR: [
+                { refId: projectRef },
+                { id: projectRef }
+              ]
+            }
+          });
+        }
+        if (!project && bearerToken) {
           try {
             const decoded = jwt.decode(bearerToken);
             if (decoded && (decoded.refId || decoded.projectId)) {

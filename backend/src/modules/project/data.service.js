@@ -83,16 +83,24 @@ exports.insertRecord = async (project, tableName, payload) => {
 /**
  * Retrieves a single record from a dynamically created table.
  */
-exports.getRecord = async (project, tableName, id) => {
+exports.getRecord = async (project, tableName, id, rlsConstraints = null) => {
   const client = getClientForProject(project);
   await checkTableAndAuthorize(client, project.dbName, tableName);
 
+  const whereClauses = [`\`id\` = ?`];
+  const queryParams = [id];
+
+  if (rlsConstraints && rlsConstraints.whereClause) {
+    whereClauses.push(rlsConstraints.whereClause);
+    queryParams.push(...rlsConstraints.params);
+  }
+
   const rows = await client.$queryRawUnsafe(
-    `SELECT * FROM \`${tableName}\` WHERE \`id\` = ? LIMIT 1`,
-    id
+    `SELECT * FROM \`${tableName}\` WHERE ${whereClauses.join(' AND ')} LIMIT 1`,
+    ...queryParams
   );
   if (!rows || rows.length === 0) {
-    throw new Error(`Record with ID "${id}" not found in table "${tableName}".`);
+    throw new Error(`Record with ID "${id}" not found in table "${tableName}" or access denied by RLS policy.`);
   }
   return rows[0];
 };
@@ -100,12 +108,12 @@ exports.getRecord = async (project, tableName, id) => {
 /**
  * Updates an existing record in a dynamically created table.
  */
-exports.updateRecord = async (project, tableName, id, payload) => {
+exports.updateRecord = async (project, tableName, id, payload, rlsConstraints = null) => {
   const client = getClientForProject(project);
   await checkTableAndAuthorize(client, project.dbName, tableName);
 
-  // Validate the record exists
-  await exports.getRecord(project, tableName, id);
+  // Validate the record exists and is visible under RLS
+  await exports.getRecord(project, tableName, id, rlsConstraints);
 
   const cols = await getTableColumns(client, project.dbName, tableName);
   const colNames = cols.map(c => c.name);
@@ -119,31 +127,45 @@ exports.updateRecord = async (project, tableName, id, payload) => {
   }
 
   if (bodyKeys.length === 0) {
-    return await exports.getRecord(project, tableName, id);
+    return await exports.getRecord(project, tableName, id, rlsConstraints);
   }
 
   const updateClauses = bodyKeys.map(k => `\`${k}\` = ?`).join(', ');
+  const whereClauses = [`\`id\` = ?`];
   const updateValues = [...bodyKeys.map(k => payload[k]), id];
 
-  const sql = `UPDATE \`${tableName}\` SET ${updateClauses} WHERE \`id\` = ?;`;
+  if (rlsConstraints && rlsConstraints.whereClause) {
+    whereClauses.push(rlsConstraints.whereClause);
+    updateValues.push(...rlsConstraints.params);
+  }
+
+  const sql = `UPDATE \`${tableName}\` SET ${updateClauses} WHERE ${whereClauses.join(' AND ')};`;
   console.log(`[DataService.updateRecord] Executing SQL: ${sql} with values:`, updateValues);
   await client.$executeRawUnsafe(sql, ...updateValues);
 
-  return await exports.getRecord(project, tableName, id);
+  return await exports.getRecord(project, tableName, id, rlsConstraints);
 };
 
 /**
  * Deletes a record from a dynamically created table.
  */
-exports.deleteRecord = async (project, tableName, id) => {
+exports.deleteRecord = async (project, tableName, id, rlsConstraints = null) => {
   const client = getClientForProject(project);
   await checkTableAndAuthorize(client, project.dbName, tableName);
 
-  const record = await exports.getRecord(project, tableName, id);
+  const record = await exports.getRecord(project, tableName, id, rlsConstraints);
 
-  const sql = `DELETE FROM \`${tableName}\` WHERE \`id\` = ?;`;
+  const whereClauses = [`\`id\` = ?`];
+  const queryParams = [id];
+
+  if (rlsConstraints && rlsConstraints.whereClause) {
+    whereClauses.push(rlsConstraints.whereClause);
+    queryParams.push(...rlsConstraints.params);
+  }
+
+  const sql = `DELETE FROM \`${tableName}\` WHERE ${whereClauses.join(' AND ')};`;
   console.log(`[DataService.deleteRecord] Executing SQL: ${sql} with ID:`, id);
-  await client.$executeRawUnsafe(sql, id);
+  await client.$executeRawUnsafe(sql, ...queryParams);
 
   return record;
 };
@@ -215,6 +237,16 @@ exports.listRecords = async (project, tableName, queryOptions) => {
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
+  // 3. RLS constraints
+  const finalWhereClauses = [...whereClauses];
+  const finalQueryParams = [...queryParams];
+  if (queryOptions.rlsConstraints && queryOptions.rlsConstraints.whereClause) {
+    finalWhereClauses.push(queryOptions.rlsConstraints.whereClause);
+    finalQueryParams.push(...queryOptions.rlsConstraints.params);
+  }
+
+  const finalWhereSql = finalWhereClauses.length > 0 ? `WHERE ${finalWhereClauses.join(' AND ')}` : '';
+
   // Sort settings
   const sortCol = colNames.includes(sort) ? sort : 'id';
   const sortOrder = ['ASC', 'DESC'].includes(order.toUpperCase()) ? order.toUpperCase() : 'DESC';
@@ -224,15 +256,15 @@ exports.listRecords = async (project, tableName, queryOptions) => {
   const parsedOffset = customOffset !== undefined ? parseInt(customOffset) : (Math.max(1, parseInt(page)) - 1) * parsedLimit;
 
   // Execute list selection
-  const querySql = `SELECT ${selectClause} FROM \`${tableName}\` ${whereSql} ORDER BY \`${sortCol}\` ${sortOrder} LIMIT ${parsedLimit} OFFSET ${parsedOffset};`;
-  console.log(`[DataService.listRecords] Executing SQL: ${querySql} with values:`, queryParams);
-  const records = await client.$queryRawUnsafe(querySql, ...queryParams);
+  const querySql = `SELECT ${selectClause} FROM \`${tableName}\` ${finalWhereSql} ORDER BY \`${sortCol}\` ${sortOrder} LIMIT ${parsedLimit} OFFSET ${parsedOffset};`;
+  console.log(`[DataService.listRecords] Executing SQL: ${querySql} with values:`, finalQueryParams);
+  const records = await client.$queryRawUnsafe(querySql, ...finalQueryParams);
 
   // Execute counting if requested
   let totalCount = null;
   if (queryOptions.count === 'true' || queryOptions.count === true) {
-    const countSql = `SELECT COUNT(*) as total FROM \`${tableName}\` ${whereSql};`;
-    const countResult = await client.$queryRawUnsafe(countSql, ...queryParams);
+    const countSql = `SELECT COUNT(*) as total FROM \`${tableName}\` ${finalWhereSql};`;
+    const countResult = await client.$queryRawUnsafe(countSql, ...finalQueryParams);
     totalCount = countResult && countResult[0] ? Number(countResult[0].total) : 0;
   }
 

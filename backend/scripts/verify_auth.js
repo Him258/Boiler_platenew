@@ -117,6 +117,72 @@ async function runTests() {
     const userEmail = `user_${Date.now()}@test.com`;
     const userPassword = 'password123';
 
+    // 4a. Test signup with x-project-ref (without apikey)
+    console.log('- Testing signup with x-project-ref only...');
+    const signupRefRes = await request('POST', '/auth/signup', {
+      'x-project-ref': projectADetails.refId
+    }, {
+      email: `user_ref_${Date.now()}@test.com`,
+      password: userPassword
+    });
+    if (signupRefRes.status !== 201) {
+      throw new Error(`Signup with x-project-ref only failed: ${JSON.stringify(signupRefRes.body)}`);
+    }
+    console.log('  ✅ Signup with x-project-ref successful.');
+
+    // 4b. Test signup with apikey (without x-project-ref)
+    console.log('- Testing signup with apikey only...');
+    const signupKeyRes = await request('POST', '/auth/signup', {
+      'apikey': anonKeyA
+    }, {
+      email: `user_key_${Date.now()}@test.com`,
+      password: userPassword
+    });
+    if (signupKeyRes.status !== 201) {
+      throw new Error(`Signup with apikey only failed: ${JSON.stringify(signupKeyRes.body)}`);
+    }
+    console.log('  ✅ Signup with apikey successful.');
+
+    // 4c. Test Control Plane signup without project context
+    console.log('- Testing Control Plane signup without project context...');
+    const cpSignupRes = await request('POST', '/auth/signup', {}, {
+      tenantName: `CP_Tenant_${Date.now()}`,
+      firstName: 'CP_First',
+      lastName: 'CP_Last',
+      email: `cp_user_${Date.now()}@test.com`,
+      password: 'password123'
+    });
+    if (cpSignupRes.status !== 201) {
+      throw new Error(`Control-plane signup failed: ${JSON.stringify(cpSignupRes.body)}`);
+    }
+    console.log('  ✅ Control-plane signup successful.');
+
+    // 4d. Test signup with invalid project reference (x-project-ref)
+    console.log('- Testing signup with invalid project reference...');
+    const invalidRefRes = await request('POST', '/auth/signup', {
+      'x-project-ref': 'invalid-project-uuid-0000000000000000'
+    }, {
+      email: `user_invalid_${Date.now()}@test.com`,
+      password: userPassword
+    });
+    if (invalidRefRes.status !== 404 && invalidRefRes.status !== 400) {
+      throw new Error(`Expected signup with invalid project ref to fail with 404 or 400, but got status ${invalidRefRes.status}: ${JSON.stringify(invalidRefRes.body)}`);
+    }
+    console.log(`  ✅ Invalid project reference rejected correctly (status: ${invalidRefRes.status}).`);
+
+    // 4e. Test signup with missing required fields in control plane context (missing project context)
+    console.log('- Testing control-plane signup with missing required fields...');
+    const missingCPRes = await request('POST', '/auth/signup', {}, {
+      email: `cp_missing_${Date.now()}@test.com`,
+      password: 'password123'
+    });
+    if (missingCPRes.status !== 400) {
+      throw new Error(`Expected missing fields to return 400 Bad Request, but got status ${missingCPRes.status}`);
+    }
+    console.log('  ✅ Missing fields check rejected correctly.');
+
+    // 4f. Test Standard Project A Signup (using both x-project-ref and apikey)
+    console.log('- Testing standard signup with both x-project-ref and apikey...');
     const signupRes = await request('POST', '/auth/signup', {
       'x-project-ref': projectADetails.refId,
       'apikey': anonKeyA
@@ -128,8 +194,8 @@ async function runTests() {
     if (signupRes.status !== 201) {
       throw new Error(`Signup on Project A failed: ${JSON.stringify(signupRes.body)}`);
     }
-    console.log('✅ User signup on Project A successful.');
-    console.log(`User ID: ${signupRes.body.data.user.id}`);
+    console.log('  ✅ User signup on Project A successful.');
+    console.log(`  User ID: ${signupRes.body.data.user.id}`);
 
     // Try signing up same user again (expecting conflict)
     console.log('Testing duplicate user Signup on Project A (should fail)...');

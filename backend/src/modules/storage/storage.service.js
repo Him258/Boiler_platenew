@@ -1,10 +1,12 @@
 const path = require('path');
 const crypto = require('crypto');
 const storageRepository = require('./storage.repository');
-const storageUtils = require('./storage.utils');
 const { validateBucketName, validateStoragePath } = require('./storage.validation');
 
-// Supported mime types whitelist (image, pdf, word, excel, csv, zip, video, audio)
+// Use LocalStorageProvider as default
+const LocalStorageProvider = require('./providers/LocalStorageProvider');
+const storageProvider = new LocalStorageProvider();
+
 const WHitelisted_MIME_TYPES = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
   'application/pdf',
@@ -16,20 +18,13 @@ const WHitelisted_MIME_TYPES = [
   'audio/mpeg', 'audio/wav', 'audio/ogg'
 ];
 
-/**
- * Validates file mimetype.
- */
 const validateMimeType = (mimeType) => {
   if (!WHitelisted_MIME_TYPES.includes(mimeType)) {
-    throw new Error(`Unsupported file type: "${mimeType}". Only images, PDFs, office docs, CSVs, ZIPs, audios, and videos are allowed.`);
+    throw new Error(`Unsupported file type: "${mimeType}".`);
   }
 };
 
-/**
- * Storage Service to handle bucket and file logic
- */
-
-exports.createBucket = async (project, name, isPublic = false) => {
+exports.createBucket = async (project, name, description, isPublic = false, storageLimit = null) => {
   validateBucketName(name);
 
   const existing = await storageRepository.getBucketByName(project.id, name);
@@ -40,7 +35,9 @@ exports.createBucket = async (project, name, isPublic = false) => {
   return await storageRepository.createBucket({
     projectId: project.id,
     name,
-    isPublic
+    description,
+    isPublic,
+    storageLimit
   });
 };
 
@@ -48,187 +45,117 @@ exports.listBuckets = async (project) => {
   return await storageRepository.listBuckets(project.id);
 };
 
-exports.deleteBucket = async (project, name) => {
-  validateBucketName(name);
-
-  const bucket = await storageRepository.getBucketByName(project.id, name);
-  if (!bucket) {
-    throw new Error(`Bucket "${name}" not found.`);
+exports.getBucket = async (project, bucketId) => {
+  const bucket = await storageRepository.getBucketById(bucketId);
+  if (!bucket || bucket.projectId !== project.id) {
+    throw new Error('Bucket not found');
   }
-
-  // 1. Physically delete all files in bucket directory on disk
-  await storageUtils.deleteBucketDirectory(project.id, name);
-
-  // 2. Database constraints will Cascade delete files metadata due to relation onDelete: Cascade
-  return await storageRepository.deleteBucket(bucket.id);
+  return bucket;
 };
 
-exports.uploadFile = async (project, bucketName, filePath, fileBuffer, fileMeta) => {
-  validateBucketName(bucketName);
+exports.updateBucket = async (project, bucketId, updates) => {
+  const bucket = await this.getBucket(project, bucketId);
+  return await storageRepository.updateBucket(bucket.id, updates);
+};
+
+exports.deleteBucket = async (project, bucketId) => {
+  const bucket = await this.getBucket(project, bucketId);
+  
+  // Wipe physical storage via provider
+  await storageProvider.deleteBucket(project.id, bucket.name);
+  
+  // Database deletes cascade automatically (or manually if raw)
+  await storageRepository.deleteBucket(bucket.id);
+};
+
+exports.uploadFile = async (project, bucketId, filePath, fileBuffer, fileMeta) => {
   validateStoragePath(filePath);
   validateMimeType(fileMeta.mimeType);
 
-  const bucket = await storageRepository.getBucketByName(project.id, bucketName);
-  if (!bucket) {
-    throw new Error(`Bucket "${bucketName}" not found.`);
+  const bucket = await this.getBucket(project, bucketId);
+
+  // Storage Limit Check
+  const projInfo = await storageRepository.getProjectStorageInfo(project.id);
+  // Ensure we compare BigInt / Numbers correctly (cast to BigInt for safe math)
+  const currentUsed = BigInt(projInfo.storageUsed || 0);
+  const limit = BigInt(projInfo.storageLimit || 1073741824); // 1GB fallback
+  const fileSize = BigInt(fileMeta.size || 0);
+
+  if (currentUsed + fileSize > limit) {
+    throw new Error('STORAGE_LIMIT_EXCEEDED');
   }
 
-  // Generate unique filename to prevent collissions on disk
+  // Generate unique physical storage key
   const ext = path.extname(fileMeta.originalName) || '';
-  const storedName = `${crypto.randomBytes(16).toString('hex')}${ext}`;
+  const storageKey = `${crypto.randomBytes(16).toString('hex')}${ext}`;
 
-  // Check if file already exists in metadata
+  // Upload to Provider
+  const fileUrl = await storageProvider.upload(project.id, bucket.name, storageKey, fileBuffer);
+
+  // Check if file already exists in DB path to overwrite metadata
   const existingFile = await storageRepository.getFileByPath(bucket.id, filePath);
   if (existingFile) {
     // Delete old physical file
-    await storageUtils.deleteFile(project.id, bucketName, existingFile.storedName);
-    // Delete database metadata
+    const oldExt = path.extname(existingFile.fileName) || '';
+    // We don't have the exact old storageKey in DB anymore (it's hidden). Wait, we need it. 
+    // Wait, the prompt requirements don't ask for storageKey. 
+    // They asked for: fileName, filePath, fileUrl, mimeType, size.
+    // If the fileUrl contains the storageKey, we can extract it or just let the provider handle it.
+    // For local storage, if fileUrl is /uploads/storage/... we can extract it.
+    // Better: If we overwrite, we just delete the old metadata and let the old physical file dangle? 
+    // No, we must delete it to free space! 
+    // Let's store the storageKey in fileUrl for local provider, or extract it.
+    const oldKey = existingFile.fileUrl.split('/').pop();
+    await storageProvider.delete(project.id, bucket.name, oldKey);
     await storageRepository.deleteFile(existingFile.id);
+    await storageRepository.updateProjectStorageUsed(project.id, -existingFile.size);
   }
-
-  // Physically write to disk
-  await storageUtils.saveFile(project.id, bucketName, storedName, fileBuffer);
 
   // Save metadata
-  return await storageRepository.createFile({
+  const fileRecord = await storageRepository.createFile({
     projectId: project.id,
     bucketId: bucket.id,
-    originalName: fileMeta.originalName,
-    storedName,
-    path: filePath,
+    fileName: fileMeta.originalName,
+    filePath,
+    fileUrl,
     mimeType: fileMeta.mimeType,
-    extension: ext.toLowerCase(),
     size: fileMeta.size,
-    uploadedBy: fileMeta.uploadedBy || null,
-    visibility: bucket.isPublic ? 'public' : 'private'
+    uploadedBy: fileMeta.uploadedBy
   });
+
+  // Update storage used
+  await storageRepository.updateProjectStorageUsed(project.id, fileMeta.size);
+
+  return fileRecord;
 };
 
-exports.getFileMetadata = async (project, bucketName, filePath) => {
-  validateBucketName(bucketName);
-  validateStoragePath(filePath);
-
-  const bucket = await storageRepository.getBucketByName(project.id, bucketName);
-  if (!bucket) {
-    throw new Error(`Bucket "${bucketName}" not found.`);
-  }
-
-  const file = await storageRepository.getFileByPath(bucket.id, filePath);
-  if (!file) {
-    throw new Error(`File "${filePath}" not found in bucket "${bucketName}".`);
-  }
-
-  return {
-    file,
-    bucket,
-    physicalPath: storageUtils.getFilePath(project.id, bucketName, file.storedName)
-  };
+exports.listFiles = async (project, bucketId) => {
+  // Validate bucket belongs to project
+  await this.getBucket(project, bucketId);
+  return await storageRepository.listFiles(project.id, bucketId);
 };
 
-exports.deleteFile = async (project, bucketName, filePath) => {
-  validateBucketName(bucketName);
-  validateStoragePath(filePath);
+exports.getFile = async (project, fileId) => {
+  const file = await storageRepository.getFileById(fileId);
+  if (!file || file.projectId !== project.id) {
+    throw new Error('File not found');
+  }
+  return file;
+};
 
-  const { file } = await exports.getFileMetadata(project, bucketName, filePath);
+exports.deleteFile = async (project, fileId) => {
+  const file = await this.getFile(project, fileId);
+  const bucket = await this.getBucket(project, file.bucketId);
+
+  // Extract storageKey from fileUrl (assumes format /uploads/storage/:proj/:bucket/:key)
+  const storageKey = file.fileUrl.split('/').pop();
 
   // 1. Physically delete
-  await storageUtils.deleteFile(project.id, bucketName, file.storedName);
+  await storageProvider.delete(project.id, bucket.name, storageKey);
 
   // 2. Delete metadata
-  return await storageRepository.deleteFile(file.id);
-};
+  await storageRepository.deleteFile(file.id);
 
-exports.moveFile = async (project, bucketName, sourcePath, destPath) => {
-  validateBucketName(bucketName);
-  validateStoragePath(sourcePath);
-  validateStoragePath(destPath);
-
-  const { file, bucket } = await exports.getFileMetadata(project, bucketName, sourcePath);
-
-  // Check if destination already occupied
-  const existingDest = await storageRepository.getFileByPath(bucket.id, destPath);
-  if (existingDest) {
-    throw new Error(`Destination path "${destPath}" already occupied.`);
-  }
-
-  // Physically move
-  // Wait, in our storage structures, files are saved on disk with uniquely generated random strings.
-  // So they don't actually move physical paths (since they are referenced by storedName inside the same project/bucket folder!).
-  // But to preserve modularity, if the source and dest were different buckets/projects we would move them.
-  // In a single bucket move, we only need to update the file path identifier in the database metadata!
-  // This is extremely efficient and fast!
-  await storageRepository.updateFilePath(file.id, destPath);
-  
-  return await storageRepository.getFileByPath(bucket.id, destPath);
-};
-
-exports.copyFile = async (project, bucketName, sourcePath, destPath) => {
-  validateBucketName(bucketName);
-  validateStoragePath(sourcePath);
-  validateStoragePath(destPath);
-
-  const { file, bucket } = await exports.getFileMetadata(project, bucketName, sourcePath);
-
-  const existingDest = await storageRepository.getFileByPath(bucket.id, destPath);
-  if (existingDest) {
-    throw new Error(`Destination path "${destPath}" already occupied.`);
-  }
-
-  // Generate new storedName and copy physical file
-  const ext = path.extname(file.originalName) || '';
-  const newStoredName = `${crypto.randomBytes(16).toString('hex')}${ext}`;
-
-  // Copy on disk
-  await storageUtils.copyFile(project.id, bucketName, file.storedName, newStoredName);
-
-  // Create new metadata
-  return await storageRepository.createFile({
-    projectId: project.id,
-    bucketId: bucket.id,
-    originalName: file.originalName,
-    storedName: newStoredName,
-    path: destPath,
-    mimeType: file.mimeType,
-    extension: file.extension,
-    size: file.size,
-    uploadedBy: file.uploadedBy,
-    visibility: file.visibility
-  });
-};
-
-exports.listFiles = async (project, bucketName, queryOptions) => {
-  validateBucketName(bucketName);
-
-  const bucket = await storageRepository.getBucketByName(project.id, bucketName);
-  if (!bucket) {
-    throw new Error(`Bucket "${bucketName}" not found.`);
-  }
-
-  const { folderPrefix, search, sort, order, page = 1, limit = 20 } = queryOptions;
-  const offset = (Math.max(1, parseInt(page)) - 1) * Math.min(100, Math.max(1, parseInt(limit)));
-
-  return await storageRepository.listFiles({
-    bucketId: bucket.id,
-    folderPrefix,
-    search,
-    sort,
-    order,
-    limit: Math.min(100, Math.max(1, parseInt(limit))),
-    offset
-  });
-};
-
-exports.generateSignedUrl = async (project, bucketName, filePath, expirySeconds = 300) => {
-  // Expiry check limits
-  const parsedExpiry = Math.min(86400, Math.max(60, parseInt(expirySeconds) || 300));
-  
-  // Verify metadata exists
-  const { file } = await exports.getFileMetadata(project, bucketName, filePath);
-
-  const token = storageUtils.generateSignedToken(project.id, bucketName, file.path, parsedExpiry);
-  return {
-    url: `/storage/v1/object/signed/${bucketName}/${file.path}?token=${token}`,
-    token,
-    expiresIn: parsedExpiry
-  };
+  // 3. Free up storage used limit
+  await storageRepository.updateProjectStorageUsed(project.id, -file.size);
 };

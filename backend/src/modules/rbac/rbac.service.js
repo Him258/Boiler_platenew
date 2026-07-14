@@ -381,6 +381,54 @@ class RbacService {
       }
     });
   }
+
+  /**
+   * Get unique permissions assigned to a user (optionally filtered by projectId)
+   */
+  async getUserPermissions(userId, projectId) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const where = { userId };
+    if (projectId) {
+      where.projectId = projectId;
+    }
+
+    const userRoles = await prisma.userRole.findMany({
+      where,
+      include: {
+        role: {
+          include: {
+            rolePermissions: {
+              include: {
+                permission: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const uniquePermissionsMap = new Map();
+
+    for (const ur of userRoles) {
+      if (ur.role && ur.role.rolePermissions) {
+        for (const rp of ur.role.rolePermissions) {
+          const perm = rp.permission;
+          if (perm && perm.status === 'Active') {
+            uniquePermissionsMap.set(perm.permissionKey, {
+              permissionKey: perm.permissionKey,
+              category: perm.category || 'general'
+            });
+          }
+        }
+      }
+    }
+
+    return Array.from(uniquePermissionsMap.values());
+  }
 }
 
 module.exports = new RbacService();

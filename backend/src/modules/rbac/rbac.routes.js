@@ -105,5 +105,6 @@ router.delete('/roles/:id/permissions/:permissionId', rbacController.removePermi
 router.post('/users/:userId/roles', rbacController.assignUserRole);
 router.get('/users/:userId/roles', rbacController.getUserRoles);
 router.delete('/users/:userId/roles/:roleId', rbacController.removeUserRole);
+router.get('/users/:userId/permissions', rbacController.getUserPermissions);
 
 module.exports = router;

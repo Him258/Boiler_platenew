@@ -1,130 +1,128 @@
+const crypto = require('crypto');
 const prisma = require('../../config/db');
 
 // --- Bucket Repository Actions ---
 
-const createBucket = async ({ projectId, name, isPublic }) => {
-  return await prisma.storageBucket.create({
-    data: {
-      projectId,
-      name,
-      isPublic
-    }
-  });
+const createBucket = async ({ projectId, name, description, isPublic, storageLimit }) => {
+  const id = crypto.randomUUID();
+  await prisma.$queryRawUnsafe(`
+    INSERT INTO StorageBucket (id, projectId, name, description, isPublic, storageLimit, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+  `, id, projectId, name, description || null, isPublic ? 1 : 0, storageLimit || null);
+
+  return getBucketById(id);
 };
 
 const getBucketByName = async (projectId, name) => {
-  return await prisma.storageBucket.findUnique({
-    where: {
-      projectId_name: {
-        projectId,
-        name
-      }
-    }
-  });
+  const buckets = await prisma.$queryRawUnsafe(`
+    SELECT * FROM StorageBucket WHERE projectId = ? AND name = ? LIMIT 1
+  `, projectId, name);
+  return buckets[0] || null;
+};
+
+const getBucketById = async (id) => {
+  const buckets = await prisma.$queryRawUnsafe(`
+    SELECT * FROM StorageBucket WHERE id = ? LIMIT 1
+  `, id);
+  return buckets[0] || null;
 };
 
 const listBuckets = async (projectId) => {
-  return await prisma.storageBucket.findMany({
-    where: { projectId },
-    orderBy: { createdAt: 'desc' }
-  });
+  return await prisma.$queryRawUnsafe(`
+    SELECT * FROM StorageBucket WHERE projectId = ? ORDER BY createdAt DESC
+  `, projectId);
 };
 
 const deleteBucket = async (id) => {
-  return await prisma.storageBucket.delete({
-    where: { id }
-  });
+  await prisma.$queryRawUnsafe(`
+    DELETE FROM StorageBucket WHERE id = ?
+  `, id);
 };
 
-const updateBucketVisibility = async (id, isPublic) => {
-  return await prisma.storageBucket.update({
-    where: { id },
-    data: { isPublic }
-  });
+const updateBucket = async (id, updates) => {
+  const setClauses = [];
+  const values = [];
+  for (const [key, value] of Object.entries(updates)) {
+    setClauses.push(`${key} = ?`);
+    values.push(value);
+  }
+  if (setClauses.length === 0) return getBucketById(id);
+  
+  values.push(id);
+  await prisma.$queryRawUnsafe(`
+    UPDATE StorageBucket SET ${setClauses.join(', ')}, updatedAt = NOW() WHERE id = ?
+  `, ...values);
+  
+  return getBucketById(id);
 };
+
 
 // --- File Repository Actions ---
 
 const createFile = async (fileData) => {
-  return await prisma.storageFile.create({
-    data: fileData
-  });
+  const id = crypto.randomUUID();
+  await prisma.$queryRawUnsafe(`
+    INSERT INTO StorageObject (id, projectId, bucketId, fileName, filePath, fileUrl, mimeType, size, uploadedBy, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+  `, id, fileData.projectId, fileData.bucketId, fileData.fileName, fileData.filePath, fileData.fileUrl || null, fileData.mimeType, fileData.size, fileData.uploadedBy || null);
+
+  return getFileById(id);
 };
 
-const getFileByPath = async (bucketId, path) => {
-  return await prisma.storageFile.findUnique({
-    where: {
-      bucketId_path: {
-        bucketId,
-        path
-      }
-    }
-  });
+const getFileById = async (id) => {
+  const files = await prisma.$queryRawUnsafe(`
+    SELECT * FROM StorageObject WHERE id = ? LIMIT 1
+  `, id);
+  return files[0] || null;
+};
+
+const getFileByPath = async (bucketId, filePath) => {
+  const files = await prisma.$queryRawUnsafe(`
+    SELECT * FROM StorageObject WHERE bucketId = ? AND filePath = ? LIMIT 1
+  `, bucketId, filePath);
+  return files[0] || null;
 };
 
 const deleteFile = async (id) => {
-  return await prisma.storageFile.delete({
-    where: { id }
-  });
+  await prisma.$queryRawUnsafe(`
+    DELETE FROM StorageObject WHERE id = ?
+  `, id);
 };
 
-const updateFilePath = async (id, newPath) => {
-  return await prisma.storageFile.update({
-    where: { id },
-    data: {
-      path: newPath
-    }
-  });
+const listFiles = async (projectId, bucketId) => {
+  return await prisma.$queryRawUnsafe(`
+    SELECT * FROM StorageObject WHERE projectId = ? AND bucketId = ? ORDER BY createdAt DESC
+  `, projectId, bucketId);
 };
 
-const listFiles = async ({ bucketId, folderPrefix, search, sort = 'createdAt', order = 'desc', limit = 20, offset = 0 }) => {
-  const whereClause = {
-    bucketId
-  };
+// --- Project Storage Limits ---
 
-  // Filter by folder path prefix if provided
-  if (folderPrefix) {
-    whereClause.path = {
-      startsWith: folderPrefix
-    };
-  }
+const updateProjectStorageUsed = async (projectId, sizeDelta) => {
+  // sizeDelta can be positive (upload) or negative (delete)
+  await prisma.$queryRawUnsafe(`
+    UPDATE Project SET storageUsed = storageUsed + ? WHERE id = ?
+  `, sizeDelta, projectId);
+};
 
-  // Handle textual search
-  if (search) {
-    whereClause.OR = [
-      { originalName: { contains: search } },
-      { path: { contains: search } }
-    ];
-  }
-
-  const items = await prisma.storageFile.findMany({
-    where: whereClause,
-    orderBy: {
-      [sort]: order.toLowerCase() === 'asc' ? 'asc' : 'desc'
-    },
-    take: limit,
-    skip: offset
-  });
-
-  const total = await prisma.storageFile.count({
-    where: whereClause
-  });
-
-  return {
-    items,
-    total
-  };
+const getProjectStorageInfo = async (projectId) => {
+  const projects = await prisma.$queryRawUnsafe(`
+    SELECT storageLimit, storageUsed FROM Project WHERE id = ? LIMIT 1
+  `, projectId);
+  return projects[0] || null;
 };
 
 module.exports = {
   createBucket,
   getBucketByName,
+  getBucketById,
   listBuckets,
   deleteBucket,
-  updateBucketVisibility,
+  updateBucket,
   createFile,
+  getFileById,
   getFileByPath,
   deleteFile,
-  updateFilePath,
-  listFiles
+  listFiles,
+  updateProjectStorageUsed,
+  getProjectStorageInfo
 };
